@@ -104,14 +104,26 @@ func (h *keysHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("X-Etcd-Cluster-ID", h.clusterInfo.ID().String())
 
-	ctx, cancel := context.WithTimeout(context.Background(), h.timeout)
-	defer cancel()
-
 	rr, err := parseKeyRequest(r, clockwork.NewRealClock())
 	if err != nil {
 		writeError(w, err)
 		return
 	}
+
+	if r.Method == "PUT" && rr.Blocking {
+		log.Printf("Get request with Blocking == true received")
+	}
+
+	var ctx context.Context
+	var cancel context.CancelFunc
+
+	if rr.Blocking {
+		ctx, cancel = context.WithCancel(context.Background())
+	} else {
+		ctx, cancel = context.WithTimeout(context.Background(), h.timeout)
+	}
+
+	defer cancel()
 
 	resp, err := h.server.Do(ctx, rr)
 	if err != nil {
@@ -372,7 +384,7 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 		)
 	}
 
-	var rec, sort, wait, dir, quorum, stream bool
+	var rec, sort, wait, dir, quorum, stream, blocking bool
 	if rec, err = getBool(r.Form, "recursive"); err != nil {
 		return emptyReq, etcdErr.NewRequestError(
 			etcdErr.EcodeInvalidField,
@@ -408,6 +420,12 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 		return emptyReq, etcdErr.NewRequestError(
 			etcdErr.EcodeInvalidField,
 			`invalid value for "stream"`,
+		)
+	}
+	if blocking, err = getBool(r.Form, "blocking"); err != nil {
+		return emptyReq, etcdErr.NewRequestError(
+			etcdErr.EcodeInvalidField,
+			`invalid value for "blocking"`,
 		)
 	}
 
@@ -467,6 +485,7 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 		Sorted:    sort,
 		Quorum:    quorum,
 		Stream:    stream,
+		Blocking:  blocking,
 	}
 
 	if pe != nil {
