@@ -145,15 +145,36 @@ func (h *keysHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("X-Etcd-Cluster-ID", h.cluster.ID().String())
 
-	ctx, cancel := context.WithTimeout(context.Background(), h.timeout)
-	defer cancel()
 	clock := clockwork.NewRealClock()
 	startTime := clock.Now()
 	rr, err := parseKeyRequest(r, clock)
+
 	if err != nil {
 		writeKeyError(w, err)
 		return
 	}
+
+	if rr.Blocking {
+		plog.Infof("Received request with blocking == true ##############################")
+	}
+	//TODO: return negative response if prev value exists and request is not blocking
+	if rr.PrevValue != "" && !rr.Blocking {
+		swapError := errors.New("Request with defined required previous value has to also be blocking")
+		writeKeyError(w, swapError)
+		reportRequestFailed(rr, swapError)
+		return
+	}
+	var ctx context.Context
+	var cancel context.CancelFunc
+
+	if rr.Blocking {
+		ctx, cancel = context.WithCancel(context.Background())
+	} else {
+		ctx, cancel = context.WithTimeout(context.Background(), h.timeout)
+	}
+
+	defer cancel()
+
 	// The path must be valid at this point (we've parsed the request successfully).
 	if !hasKeyPrefixAccess(h.sec, r, r.URL.Path[len(keysPrefix):], rr.Recursive) {
 		writeKeyNoAuth(w)
@@ -477,7 +498,7 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 		)
 	}
 
-	var rec, sort, wait, dir, quorum, stream bool
+	var rec, sort, wait, dir, quorum, stream, blocking bool
 	if rec, err = getBool(r.Form, "recursive"); err != nil {
 		return emptyReq, etcdErr.NewRequestError(
 			etcdErr.EcodeInvalidField,
@@ -513,6 +534,13 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 		return emptyReq, etcdErr.NewRequestError(
 			etcdErr.EcodeInvalidField,
 			`invalid value for "stream"`,
+		)
+	}
+
+	if blocking, err = getBool(r.Form, "blocking"); err != nil {
+		return emptyReq, etcdErr.NewRequestError(
+			etcdErr.EcodeInvalidField,
+			`invalid value for "blocking"`,
 		)
 	}
 
@@ -572,6 +600,7 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 		Sorted:    sort,
 		Quorum:    quorum,
 		Stream:    stream,
+		Blocking:  blocking,
 	}
 
 	if pe != nil {

@@ -276,9 +276,15 @@ func (n *node) run(r *raft) {
 		// described in raft dissertation)
 		// Currently it is dropped in Step silently.
 		case m := <-propc:
+			if m.Type == pb.MsgProp && lead == r.lead {
+				//plog.Infof("Received message from channel propc")
+			}
 			m.From = r.id
 			r.Step(m)
 		case m := <-n.recvc:
+			if m.Type == pb.MsgProp {
+				//plog.Infof("Received message from channel recvc")
+			}
 			// filter out response message from unknown From.
 			if _, ok := r.prs[m.From]; ok || !IsResponseMsg(m) {
 				r.Step(m) // raft never returns an error
@@ -391,10 +397,16 @@ func (n *node) step(ctx context.Context, m pb.Message) error {
 
 	select {
 	case ch <- m:
+		if m.Type == pb.MsgProp {
+			//NOTE: this case is accessed before quorum check
+			//plog.Infof("message is in channel")
+		}
 		return nil
 	case <-ctx.Done():
+		//plog.Infof("context is done, should not happen")
 		return ctx.Err()
 	case <-n.done:
+		//plog.Infof("node stopped")
 		return ErrStopped
 	}
 }

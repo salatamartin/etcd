@@ -98,7 +98,9 @@ func (l *raftLog) append(ents ...pb.Entry) uint64 {
 	if after := ents[0].Index - 1; after < l.committed {
 		l.logger.Panicf("after(%d) is out of range [committed(%d)]", after, l.committed)
 	}
+	//plog.Infof("last index before truncation: %d", l.lastIndex())
 	l.unstable.truncateAndAppend(ents)
+	//plog.Infof("last index after truncation: %d", l.lastIndex())
 	return l.lastIndex()
 }
 
@@ -280,10 +282,13 @@ func (l *raftLog) matchTerm(i, term uint64) bool {
 }
 
 func (l *raftLog) maybeCommit(maxIndex, term uint64) bool {
+	//plog.Infof("Currently in raftLog.maybeCommit")
 	if maxIndex > l.committed && l.zeroTermOnErrCompacted(l.term(maxIndex)) == term {
 		l.commitTo(maxIndex)
+		//plog.Infof("Commit successful")
 		return true
 	}
+	//plog.Infof("Commit not successful,maxIndex:%d, l.commited:%d", maxIndex, l.committed)
 	return false
 }
 

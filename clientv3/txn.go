@@ -82,6 +82,8 @@ func (txn *txn) If(cs ...Cmp) Txn {
 		panic("cannot call If after Else!")
 	}
 
+	txn.cif = true
+
 	for _, cmp := range cs {
 		txn.cmps = append(txn.cmps, (*pb.Compare)(&cmp))
 	}
@@ -141,11 +143,12 @@ func (txn *txn) Commit() (*TxnResponse, error) {
 			return (*TxnResponse)(resp), nil
 		}
 
-		if txn.isWrite {
+		if isRPCError(err) {
 			return nil, err
 		}
 
-		if isRPCError(err) {
+		if txn.isWrite {
+			go kv.switchRemote(err)
 			return nil, err
 		}
 

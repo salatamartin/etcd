@@ -115,6 +115,7 @@ func (pr *Progress) maybeUpdate(n uint64) bool {
 	if pr.Next < n+1 {
 		pr.Next = n + 1
 	}
+	//plog.Infof("Log's Match after maybeUpdate is %d (updated is %t)", pr.Match, updated)
 	return updated
 }
 

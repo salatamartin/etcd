@@ -18,9 +18,11 @@ import (
 	"bytes"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/etcdserver/api/v3rpc"
 	"github.com/coreos/etcd/integration"
 	"github.com/coreos/etcd/lease"
 	"github.com/coreos/etcd/pkg/testutil"
@@ -249,5 +251,130 @@ func TestKVDelete(t *testing.T) {
 	}
 	if len(gresp.Kvs) > 0 {
 		t.Fatalf("gresp.Kvs got %+v, want none", gresp.Kvs)
+	}
+}
+
+func TestKVCompact(t *testing.T) {
+	defer testutil.AfterTest(t)
+
+	clus := integration.NewClusterV3(t, &integration.ClusterConfig{Size: 3})
+	defer clus.Terminate(t)
+
+	kv := clientv3.NewKV(clus.RandClient())
+
+	for i := 0; i < 10; i++ {
+		if _, err := kv.Put("foo", "bar", lease.NoLease); err != nil {
+			t.Fatalf("couldn't put 'foo' (%v)", err)
+		}
+	}
+
+	err := kv.Compact(7)
+	if err != nil {
+		t.Fatalf("couldn't compact kv space (%v)", err)
+	}
+	err = kv.Compact(7)
+	if err == nil || err != v3rpc.ErrCompacted {
+		t.Fatalf("error got %v, want %v", err, v3rpc.ErrFutureRev)
+	}
+
+	wc := clientv3.NewWatcher(clus.RandClient())
+	defer wc.Close()
+	wchan := wc.Watch(context.TODO(), "foo", 3)
+
+	_, ok := <-wchan
+	if ok {
+		t.Fatalf("wchan ok got %v, want false", ok)
+	}
+
+	err = kv.Compact(1000)
+	if err == nil || err != v3rpc.ErrFutureRev {
+		t.Fatalf("error got %v, want %v", err, v3rpc.ErrFutureRev)
+	}
+}
+
+// TestKVGetRetry ensures get will retry on disconnect.
+func TestKVGetRetry(t *testing.T) {
+	defer testutil.AfterTest(t)
+
+	clus := integration.NewClusterV3(t, &integration.ClusterConfig{Size: 3})
+	defer clus.Terminate(t)
+
+	kv := clientv3.NewKV(clus.Client(0))
+
+	if _, err := kv.Put("foo", "bar", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	clus.Members[0].Stop(t)
+	<-clus.Members[0].StopNotify()
+
+	donec := make(chan struct{})
+	go func() {
+		// Get will fail, but reconnect will trigger
+		gresp, gerr := kv.Get("foo", 0)
+		if gerr != nil {
+			t.Fatal(gerr)
+		}
+		wkvs := []*storagepb.KeyValue{
+			{
+				Key:            []byte("foo"),
+				Value:          []byte("bar"),
+				CreateRevision: 2,
+				ModRevision:    2,
+				Version:        1,
+			},
+		}
+		if !reflect.DeepEqual(gresp.Kvs, wkvs) {
+			t.Fatalf("bad get: got %v, want %v", gresp.Kvs, wkvs)
+		}
+		donec <- struct{}{}
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	clus.Members[0].Restart(t)
+
+	select {
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for get")
+	case <-donec:
+	}
+}
+
+// TestKVPutFailGetRetry ensures a get will retry following a failed put.
+func TestKVPutFailGetRetry(t *testing.T) {
+	defer testutil.AfterTest(t)
+
+	clus := integration.NewClusterV3(t, &integration.ClusterConfig{Size: 3})
+	defer clus.Terminate(t)
+
+	kv := clientv3.NewKV(clus.Client(0))
+	clus.Members[0].Stop(t)
+	<-clus.Members[0].StopNotify()
+
+	_, err := kv.Put("foo", "bar", 0)
+	if err == nil {
+		t.Fatalf("got success on disconnected put, wanted error")
+	}
+
+	donec := make(chan struct{})
+	go func() {
+		// Get will fail, but reconnect will trigger
+		gresp, gerr := kv.Get("foo", 0)
+		if gerr != nil {
+			t.Fatal(gerr)
+		}
+		if len(gresp.Kvs) != 0 {
+			t.Fatalf("bad get kvs: got %+v, want empty", gresp.Kvs)
+		}
+		donec <- struct{}{}
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	clus.Members[0].Restart(t)
+
+	select {
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for get")
+	case <-donec:
 	}
 }

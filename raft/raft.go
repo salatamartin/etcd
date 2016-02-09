@@ -22,12 +22,34 @@ import (
 	"sort"
 	"strings"
 
+	"path"
+	"regexp"
+
+	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
+	serverpb "github.com/coreos/etcd/etcdserver/etcdserverpb"
+	"github.com/coreos/etcd/pkg/pbutil"
 	pb "github.com/coreos/etcd/raft/raftpb"
 )
 
 // None is a placeholder node ID used when there is no leader.
 const None uint64 = 0
 const noLimit = math.MaxUint64
+
+const (
+	StoreClusterPrefix = "/0"
+	attributesSuffix   = "attributes"
+)
+
+var (
+	storeMembersPrefix        = path.Join(StoreClusterPrefix, "members")
+	storeRemovedMembersPrefix = path.Join(StoreClusterPrefix, "removed_members")
+)
+
+var (
+	plog = capnslog.NewPackageLogger("github.com/coreos/etcd", "raft")
+
+	storeMemberAttributeRegexp = regexp.MustCompile(path.Join(storeMembersPrefix, "[[:xdigit:]]{1,16}", attributesSuffix))
+)
 
 var errNoLeader = errors.New("no leader")
 
@@ -354,6 +376,7 @@ func (r *raft) bcastAppend() {
 		if id == r.id {
 			continue
 		}
+
 		r.sendAppend(id)
 	}
 }
@@ -380,6 +403,19 @@ func (r *raft) maybeCommit() bool {
 	}
 	sort.Sort(sort.Reverse(mis))
 	mci := mis[r.quorum()-1]
+	//plog.Infof("Matches of every peer is: %v, the used index is %d (%d)", mis, r.quorum()-1, mci)
+	return r.raftLog.maybeCommit(mci, r.Term)
+}
+
+func (r *raft) maybeCommitWithoutQuorum() bool {
+	// TODO(bmizerany): optimize.. Currently naive
+	mis := make(uint64Slice, 0, len(r.prs))
+	for id := range r.prs {
+		mis = append(mis, r.prs[id].Match)
+	}
+	sort.Sort(sort.Reverse(mis))
+	mci := mis[0]
+	//plog.Infof("Matches of every peer is: %v, the used index is %d (%d)", mis, r.quorum()-1, mci)
 	return r.raftLog.maybeCommit(mci, r.Term)
 }
 
@@ -412,6 +448,15 @@ func (r *raft) appendEntry(es ...pb.Entry) {
 	r.raftLog.append(es...)
 	r.prs[r.id].maybeUpdate(r.raftLog.lastIndex())
 	// Regardless of maybeCommit's return, our caller will call bcastAppend.
+
+	if len(es) == 1 {
+		request := retrieveMessage(es[0])
+		//plog.Infof("Parsed request: %s, Blocking:%t, Quorum:%t", request.Method, request.Blocking, request.Quorum)
+		if request.Method == "PUT" && !request.Quorum {
+			r.maybeCommitWithoutQuorum()
+			return
+		}
+	}
 	r.maybeCommit()
 }
 
@@ -581,6 +626,9 @@ func stepLeader(r *raft, m pb.Message) {
 		}
 		return
 	case pb.MsgProp:
+		if m.Type == pb.MsgProp {
+			//plog.Infof("raft/raft stepLeader received MsgProp")
+		}
 		if len(m.Entries) == 0 {
 			r.logger.Panicf("%x stepped empty MsgProp", r.id)
 		}
@@ -893,6 +941,20 @@ func (r *raft) checkQuorumActive() bool {
 
 		r.prs[id].RecentActive = false
 	}
-
+	//plog.Infof("checkQuorumActive is %s", act >= r.quorum())
 	return act >= r.quorum()
+}
+
+func retrieveMessage(e pb.Entry) serverpb.Request {
+	var request serverpb.Request
+	var raftReq serverpb.InternalRaftRequest
+	if !pbutil.MaybeUnmarshal(&raftReq, e.Data) { // backward compatible
+		pbutil.MustUnmarshal(&request, e.Data)
+	} else {
+		switch {
+		case raftReq.V2 != nil:
+			request = *raftReq.V2
+		}
+	}
+	return request
 }

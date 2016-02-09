@@ -36,12 +36,14 @@ const (
 type Agent struct {
 	state string // the state of etcd process
 
-	cmd     *exec.Cmd
-	logfile *os.File
-	l       net.Listener
+	cmd         *exec.Cmd
+	logfile     *os.File
+	etcdLogPath string
+
+	l net.Listener
 }
 
-func newAgent(etcd string) (*Agent, error) {
+func newAgent(etcd, etcdLogPath string) (*Agent, error) {
 	// check if the file exists
 	_, err := os.Stat(etcd)
 	if err != nil {
@@ -50,12 +52,12 @@ func newAgent(etcd string) (*Agent, error) {
 
 	c := exec.Command(etcd)
 
-	f, err := os.Create("etcd.log")
+	f, err := os.Create(etcdLogPath)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Agent{state: stateUninitialized, cmd: c, logfile: f}, nil
+	return &Agent{state: stateUninitialized, cmd: c, logfile: f, etcdLogPath: etcdLogPath}, nil
 }
 
 // start starts a new etcd process with the given args.
@@ -112,10 +114,10 @@ func (a *Agent) cleanup() error {
 	a.state = stateUninitialized
 
 	a.logfile.Close()
-	if err := archiveLogAndDataDir("etcd.log", a.dataDir()); err != nil {
+	if err := archiveLogAndDataDir(a.etcdLogPath, a.dataDir()); err != nil {
 		return err
 	}
-	f, err := os.Create("etcd.log")
+	f, err := os.Create(a.etcdLogPath)
 	a.logfile = f
 	return err
 }
@@ -150,9 +152,9 @@ func (a *Agent) status() client.Status {
 func (a *Agent) dataDir() string {
 	datadir := path.Join(a.cmd.Path, "*.etcd")
 	args := a.cmd.Args
-	// only parse the simple case like "-data-dir /var/lib/etcd"
+	// only parse the simple case like "--data-dir /var/lib/etcd"
 	for i, arg := range args {
-		if arg == "-data-dir" {
+		if arg == "--data-dir" {
 			datadir = args[i+1]
 			break
 		}

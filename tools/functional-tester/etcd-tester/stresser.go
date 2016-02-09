@@ -16,6 +16,8 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
+	"log"
 	"math/rand"
 	"net"
 	"net/http"
@@ -24,9 +26,14 @@ import (
 
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	"github.com/coreos/etcd/Godeps/_workspace/src/google.golang.org/grpc"
+	"github.com/coreos/etcd/Godeps/_workspace/src/google.golang.org/grpc/grpclog"
 	clientV2 "github.com/coreos/etcd/client"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 )
+
+func init() {
+	grpclog.SetLogger(log.New(ioutil.Discard, "", 0))
+}
 
 type Stresser interface {
 	// Stress starts to stress the etcd cluster
@@ -55,7 +62,7 @@ type stresser struct {
 func (s *stresser) Stress() error {
 	conn, err := grpc.Dial(s.Endpoint, grpc.WithInsecure(), grpc.WithTimeout(5*time.Second))
 	if err != nil {
-		return fmt.Errorf("no connection available for %s (%v)", s.Endpoint, err)
+		return fmt.Errorf("%v (%s)", err, s.Endpoint)
 	}
 	kvc := pb.NewKVClient(conn)
 
@@ -71,7 +78,7 @@ func (s *stresser) Stress() error {
 					Value: []byte(randStr(s.KeySize)),
 				})
 				putcancel()
-				if err == context.Canceled {
+				if grpc.ErrorDesc(err) == context.Canceled.Error() {
 					return
 				}
 				s.mu.Lock()
