@@ -524,11 +524,14 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 			`invalid value for "dir"`,
 		)
 	}
+	//if not specified, quorum should be true
 	if quorum, err = getBool(r.Form, "quorum"); err != nil {
 		return emptyReq, etcdErr.NewRequestError(
 			etcdErr.EcodeInvalidField,
 			`invalid value for "quorum"`,
 		)
+	} else if _, exists := r.Form["quorum"]; !exists {
+		quorum = true
 	}
 	if stream, err = getBool(r.Form, "stream"); err != nil {
 		return emptyReq, etcdErr.NewRequestError(
