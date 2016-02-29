@@ -2,9 +2,15 @@ package raft
 
 import (
 	"sync"
+	"time"
 
 	//serverpb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	pb "github.com/coreos/etcd/raft/raftpb"
+	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
+)
+
+const (
+	pushLocalStoreDeadline time.Duration = 5*time.Second
 )
 
 type LocalStore interface {
@@ -18,14 +24,19 @@ type LocalStore interface {
 
 	//actually returns index of first entry not sent
 	LastSent() uint64
+
+	Context() (context.Context, context.CancelFunc)
+
+	SetContext(context.Context, context.CancelFunc)
 }
 
-//TODO: add mutex to protect
 type localStore struct {
 	mu     sync.Mutex
 	ents   []*pb.Entry
 	logger Logger
 	lastIndexSent uint64
+	context context.Context
+	cancel context.CancelFunc
 }
 
 func NewLocalStore(log Logger) *localStore {
@@ -76,4 +87,11 @@ func (ls *localStore) Merge(otherStore LocalStore) {
 	}
 }
 
-func (ls *localStore) LastSent() {return ls.lastIndexSent}
+func (ls *localStore) LastSent() uint64 {return ls.lastIndexSent}
+
+func (ls *localStore) Context() (context.Context, context.CancelFunc) {return ls.context,ls.cancel}
+
+func (ls *localStore) SetContext(ctx context.Context, cancel context.CancelFunc) {
+	ls.context = ctx
+	ls.cancel = cancel
+}

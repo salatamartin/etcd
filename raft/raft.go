@@ -29,6 +29,7 @@ import (
 	//serverpb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	//"github.com/coreos/etcd/pkg/pbutil"
 	pb "github.com/coreos/etcd/raft/raftpb"
+	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 )
 
 // None is a placeholder node ID used when there is no leader.
@@ -774,6 +775,26 @@ func stepFollower(r *raft, m pb.Message) {
 		r.electionElapsed = 0
 		r.lead = m.From
 		r.handleHeartbeat(m)
+		//TODO: handle localstore
+		//TODO: implement timeout (we don't want to send the same entries every heartbeat)
+		var ctx context.Context
+		var cancel context.CancelFunc
+
+		ctx, cancel = r.RaftLog.Localstore.Context()
+		if ctx == nil {
+			ctx, cancel = context.WithTimeout(context.Background(), pushLocalStoreDeadline)
+			r.RaftLog.Localstore.SetContext(ctx, cancel)
+			//TODO: push entries from here
+
+		} else {
+			select {
+			case <-ctx.Done():
+				plog.Infof("Deadline for LocalStore response is finished")
+				cancel()
+				ctx = nil
+			default:
+			}
+		}
 	case pb.MsgSnap:
 		r.electionElapsed = 0
 		r.handleSnapshot(m)
