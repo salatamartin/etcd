@@ -15,6 +15,9 @@ type LocalStore interface {
 	Merge(store LocalStore)
 
 	Entries() []*pb.Entry
+
+	//actually returns index of first entry not sent
+	LastSent() uint64
 }
 
 //TODO: add mutex to protect
@@ -22,6 +25,7 @@ type localStore struct {
 	mu     sync.Mutex
 	ents   []*pb.Entry
 	logger Logger
+	lastIndexSent uint64
 }
 
 func NewLocalStore(log Logger) *localStore {
@@ -41,7 +45,11 @@ func (ls *localStore) MaybeAdd(ent *pb.Entry) (bool, error) {
 				//TODO: write to log that entry has not been added
 				return false, nil
 			}
-			ls.ents[index] = ent
+			ls.ents = append(ls.ents[:index], ls.ents[index+1:]...)
+			ls.ents = append(ls.ents,ent)
+			if ls.lastIndexSent != 0 {
+				ls.lastIndexSent--
+			}
 			return true, nil
 		}
 	}
@@ -67,3 +75,5 @@ func (ls *localStore) Merge(otherStore LocalStore) {
 		}
 	}
 }
+
+func (ls *localStore) LastSent() {return ls.lastIndexSent}
