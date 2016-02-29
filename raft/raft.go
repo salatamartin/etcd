@@ -449,14 +449,6 @@ func (r *raft) appendEntry(es ...pb.Entry) {
 	r.prs[r.id].maybeUpdate(r.RaftLog.lastIndex())
 	// Regardless of maybeCommit's return, our caller will call bcastAppend.
 
-	if len(es) == 1 {
-		request := es[0].RetrieveMessage()
-		//plog.Infof("Parsed request: %s, Blocking:%t, Quorum:%t", request.Method, request.Blocking, request.Quorum)
-		if request.Method == "PUT" && !request.Quorum {
-			r.maybeCommitWithoutQuorum()
-			return
-		}
-	}
 	r.maybeCommit()
 }
 
