@@ -157,7 +157,7 @@ func (h *keysHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if rr.Blocking {
 		plog.Infof("Received request with blocking == true ##############################")
 	}
-	//TODO: return negative response if prev value exists and request is not blocking
+
 	if rr.PrevValue != "" && !rr.Blocking {
 		swapError := errors.New("Request with defined required previous value has to also be blocking")
 		writeKeyError(w, swapError)
@@ -201,6 +201,13 @@ func (h *keysHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultWatchTimeout)
 		defer cancel()
 		handleKeyWatch(ctx, w, resp.Watcher, rr.Stream, h.timer)
+	case resp.NoQuorumResponse != "":
+		//TODO: rewrite response creation
+		w.Header().Add("X-Etcd-Index", fmt.Sprint(0))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(0)
+		j, _ := json.Marshal(resp.NoQuorumResponse)
+		fmt.Fprintln(w, string(j))
 	default:
 		writeKeyError(w, errors.New("received response with no Event/Watcher!"))
 	}
@@ -498,7 +505,7 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 		)
 	}
 
-	var rec, sort, wait, dir, quorum, stream, blocking bool
+	var rec, sort, wait, dir, quorum, noputquorum, stream, blocking bool
 	if rec, err = getBool(r.Form, "recursive"); err != nil {
 		return emptyReq, etcdErr.NewRequestError(
 			etcdErr.EcodeInvalidField,
@@ -533,6 +540,14 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 	} else if _, exists := r.Form["quorum"]; !exists {
 		quorum = true
 	}
+
+	if noputquorum, err = getBool(r.Form, "noputquorum"); err != nil {
+		return emptyReq, etcdErr.NewRequestError(
+			etcdErr.EcodeInvalidField,
+			`invalid value for "noputquorum"`,
+		)
+	}
+
 	if stream, err = getBool(r.Form, "stream"); err != nil {
 		return emptyReq, etcdErr.NewRequestError(
 			etcdErr.EcodeInvalidField,
@@ -604,6 +619,7 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 		Quorum:    quorum,
 		Stream:    stream,
 		Blocking:  blocking,
+		NoPutQuorum:noputquorum,
 	}
 
 	if pe != nil {

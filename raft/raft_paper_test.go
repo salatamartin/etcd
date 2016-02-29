@@ -400,15 +400,15 @@ func TestLeaderStartReplication(t *testing.T) {
 	r.becomeCandidate()
 	r.becomeLeader()
 	commitNoopEntry(r, s)
-	li := r.raftLog.lastIndex()
+	li := r.RaftLog.lastIndex()
 
 	ents := []pb.Entry{{Data: []byte("some data")}}
 	r.Step(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: ents})
 
-	if g := r.raftLog.lastIndex(); g != li+1 {
+	if g := r.RaftLog.lastIndex(); g != li+1 {
 		t.Errorf("lastIndex = %d, want %d", g, li+1)
 	}
-	if g := r.raftLog.committed; g != li {
+	if g := r.RaftLog.committed; g != li {
 		t.Errorf("committed = %d, want %d", g, li)
 	}
 	msgs := r.readMessages()
@@ -421,7 +421,7 @@ func TestLeaderStartReplication(t *testing.T) {
 	if !reflect.DeepEqual(msgs, wmsgs) {
 		t.Errorf("msgs = %+v, want %+v", msgs, wmsgs)
 	}
-	if g := r.raftLog.unstableEntries(); !reflect.DeepEqual(g, wents) {
+	if g := r.RaftLog.unstableEntries(); !reflect.DeepEqual(g, wents) {
 		t.Errorf("ents = %+v, want %+v", g, wents)
 	}
 }
@@ -439,18 +439,18 @@ func TestLeaderCommitEntry(t *testing.T) {
 	r.becomeCandidate()
 	r.becomeLeader()
 	commitNoopEntry(r, s)
-	li := r.raftLog.lastIndex()
+	li := r.RaftLog.lastIndex()
 	r.Step(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{Data: []byte("some data")}}})
 
 	for _, m := range r.readMessages() {
 		r.Step(acceptAndReply(m))
 	}
 
-	if g := r.raftLog.committed; g != li+1 {
+	if g := r.RaftLog.committed; g != li+1 {
 		t.Errorf("committed = %d, want %d", g, li+1)
 	}
 	wents := []pb.Entry{{Index: li + 1, Term: 1, Data: []byte("some data")}}
-	if g := r.raftLog.nextEnts(); !reflect.DeepEqual(g, wents) {
+	if g := r.RaftLog.nextEnts(); !reflect.DeepEqual(g, wents) {
 		t.Errorf("nextEnts = %+v, want %+v", g, wents)
 	}
 	msgs := r.readMessages()
@@ -493,7 +493,7 @@ func TestLeaderAcknowledgeCommit(t *testing.T) {
 		r.becomeCandidate()
 		r.becomeLeader()
 		commitNoopEntry(r, s)
-		li := r.raftLog.lastIndex()
+		li := r.RaftLog.lastIndex()
 		r.Step(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{Data: []byte("some data")}}})
 
 		for _, m := range r.readMessages() {
@@ -502,7 +502,7 @@ func TestLeaderAcknowledgeCommit(t *testing.T) {
 			}
 		}
 
-		if g := r.raftLog.committed > li; g != tt.wack {
+		if g := r.RaftLog.committed > li; g != tt.wack {
 			t.Errorf("#%d: ack commit = %v, want %v", i, g, tt.wack)
 		}
 	}
@@ -535,7 +535,7 @@ func TestLeaderCommitPrecedingEntries(t *testing.T) {
 
 		li := uint64(len(tt))
 		wents := append(tt, pb.Entry{Term: 3, Index: li + 1}, pb.Entry{Term: 3, Index: li + 2, Data: []byte("some data")})
-		if g := r.raftLog.nextEnts(); !reflect.DeepEqual(g, wents) {
+		if g := r.RaftLog.nextEnts(); !reflect.DeepEqual(g, wents) {
 			t.Errorf("#%d: ents = %+v, want %+v", i, g, wents)
 		}
 	}
@@ -583,11 +583,11 @@ func TestFollowerCommitEntry(t *testing.T) {
 
 		r.Step(pb.Message{From: 2, To: 1, Type: pb.MsgApp, Term: 1, Entries: tt.ents, Commit: tt.commit})
 
-		if g := r.raftLog.committed; g != tt.commit {
+		if g := r.RaftLog.committed; g != tt.commit {
 			t.Errorf("#%d: committed = %d, want %d", i, g, tt.commit)
 		}
 		wents := tt.ents[:int(tt.commit)]
-		if g := r.raftLog.nextEnts(); !reflect.DeepEqual(g, wents) {
+		if g := r.RaftLog.nextEnts(); !reflect.DeepEqual(g, wents) {
 			t.Errorf("#%d: nextEnts = %v, want %v", i, g, wents)
 		}
 	}
@@ -682,10 +682,10 @@ func TestFollowerAppendEntries(t *testing.T) {
 
 		r.Step(pb.Message{From: 2, To: 1, Type: pb.MsgApp, Term: 2, LogTerm: tt.term, Index: tt.index, Entries: tt.ents})
 
-		if g := r.raftLog.allEntries(); !reflect.DeepEqual(g, tt.wents) {
+		if g := r.RaftLog.allEntries(); !reflect.DeepEqual(g, tt.wents) {
 			t.Errorf("#%d: ents = %+v, want %+v", i, g, tt.wents)
 		}
-		if g := r.raftLog.unstableEntries(); !reflect.DeepEqual(g, tt.wunstable) {
+		if g := r.RaftLog.unstableEntries(); !reflect.DeepEqual(g, tt.wunstable) {
 			t.Errorf("#%d: unstableEnts = %+v, want %+v", i, g, tt.wunstable)
 		}
 	}
@@ -747,7 +747,7 @@ func TestLeaderSyncFollowerLog(t *testing.T) {
 		leadStorage := NewMemoryStorage()
 		leadStorage.Append(ents)
 		lead := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, leadStorage)
-		lead.loadState(pb.HardState{Commit: lead.raftLog.lastIndex(), Term: term})
+		lead.loadState(pb.HardState{Commit: lead.RaftLog.lastIndex(), Term: term})
 		followerStorage := NewMemoryStorage()
 		followerStorage.Append(tt)
 		follower := newTestRaft(2, []uint64{1, 2, 3}, 10, 1, followerStorage)
@@ -761,7 +761,7 @@ func TestLeaderSyncFollowerLog(t *testing.T) {
 
 		n.send(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{}}})
 
-		if g := diffu(ltoa(lead.raftLog), ltoa(follower.raftLog)); g != "" {
+		if g := diffu(ltoa(lead.RaftLog), ltoa(follower.RaftLog)); g != "" {
 			t.Errorf("#%d: log diff:\n%s", i, g)
 		}
 	}
@@ -888,8 +888,8 @@ func TestLeaderOnlyCommitsLogFromCurrentTerm(t *testing.T) {
 		r.Step(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{}}})
 
 		r.Step(pb.Message{From: 2, To: 1, Type: pb.MsgAppResp, Term: r.Term, Index: tt.index})
-		if r.raftLog.committed != tt.wcommit {
-			t.Errorf("#%d: commit = %d, want %d", i, r.raftLog.committed, tt.wcommit)
+		if r.RaftLog.committed != tt.wcommit {
+			t.Errorf("#%d: commit = %d, want %d", i, r.RaftLog.committed, tt.wcommit)
 		}
 	}
 }
@@ -915,9 +915,9 @@ func commitNoopEntry(r *raft, s *MemoryStorage) {
 	}
 	// ignore further messages to refresh followers' commit index
 	r.readMessages()
-	s.Append(r.raftLog.unstableEntries())
-	r.raftLog.appliedTo(r.raftLog.committed)
-	r.raftLog.stableTo(r.raftLog.lastIndex(), r.raftLog.lastTerm())
+	s.Append(r.RaftLog.unstableEntries())
+	r.RaftLog.appliedTo(r.RaftLog.committed)
+	r.RaftLog.stableTo(r.RaftLog.lastIndex(), r.RaftLog.lastTerm())
 }
 
 func acceptAndReply(m pb.Message) pb.Message {

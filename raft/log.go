@@ -23,21 +23,24 @@ import (
 
 type raftLog struct {
 	// storage contains all stable entries since the last snapshot.
-	storage Storage
+	storage    Storage
 
 	// unstable contains all unstable entries and snapshot.
 	// they will be saved into storage.
-	unstable unstable
+	unstable   unstable
+
+	// localstore handles non-quorum PUT requests persistently
+	Localstore LocalStore
 
 	// committed is the highest log position that is known to be in
 	// stable storage on a quorum of nodes.
-	committed uint64
+	committed  uint64
 	// applied is the highest log position that the application has
 	// been instructed to apply to its state machine.
 	// Invariant: applied <= committed
-	applied uint64
+	applied    uint64
 
-	logger Logger
+	logger     Logger
 }
 
 // newLog returns log using the given storage. It recovers the log to the state
@@ -47,8 +50,9 @@ func newLog(storage Storage, logger Logger) *raftLog {
 		log.Panic("storage must not be nil")
 	}
 	log := &raftLog{
-		storage: storage,
-		logger:  logger,
+		storage:    storage,
+		logger:     logger,
+		Localstore: NewLocalStore(logger),
 	}
 	firstIndex, err := storage.FirstIndex()
 	if err != nil {

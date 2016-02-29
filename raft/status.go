@@ -36,7 +36,7 @@ func getStatus(r *raft) Status {
 	s.HardState = r.hardState()
 	s.SoftState = *r.softState()
 
-	s.Applied = r.raftLog.applied
+	s.Applied = r.RaftLog.applied
 
 	if s.RaftState == StateLeader {
 		s.Progress = make(map[uint64]Progress)

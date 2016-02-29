@@ -28,11 +28,11 @@ import (
 // nextEnts returns the appliable entries and updates the applied index
 func nextEnts(r *raft, s *MemoryStorage) (ents []pb.Entry) {
 	// Transfer all unstable entries to "stable" storage.
-	s.Append(r.raftLog.unstableEntries())
-	r.raftLog.stableTo(r.raftLog.lastIndex(), r.raftLog.lastTerm())
+	s.Append(r.RaftLog.unstableEntries())
+	r.RaftLog.stableTo(r.RaftLog.lastIndex(), r.RaftLog.lastTerm())
 
-	ents = r.raftLog.nextEnts()
-	r.raftLog.appliedTo(r.raftLog.committed)
+	ents = r.RaftLog.nextEnts()
+	r.RaftLog.appliedTo(r.RaftLog.committed)
 	return ents
 }
 
@@ -351,8 +351,8 @@ func TestLogReplication(t *testing.T) {
 		for j, x := range tt.network.peers {
 			sm := x.(*raft)
 
-			if sm.raftLog.committed != tt.wcommitted {
-				t.Errorf("#%d.%d: committed = %d, want %d", i, j, sm.raftLog.committed, tt.wcommitted)
+			if sm.RaftLog.committed != tt.wcommitted {
+				t.Errorf("#%d.%d: committed = %d, want %d", i, j, sm.RaftLog.committed, tt.wcommitted)
 			}
 
 			ents := []pb.Entry{}
@@ -383,8 +383,8 @@ func TestSingleNodeCommit(t *testing.T) {
 	tt.send(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{Data: []byte("some data")}}})
 
 	sm := tt.peers[1].(*raft)
-	if sm.raftLog.committed != 3 {
-		t.Errorf("committed = %d, want %d", sm.raftLog.committed, 3)
+	if sm.RaftLog.committed != 3 {
+		t.Errorf("committed = %d, want %d", sm.RaftLog.committed, 3)
 	}
 }
 
@@ -404,8 +404,8 @@ func TestCannotCommitWithoutNewTermEntry(t *testing.T) {
 	tt.send(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{Data: []byte("some data")}}})
 
 	sm := tt.peers[1].(*raft)
-	if sm.raftLog.committed != 1 {
-		t.Errorf("committed = %d, want %d", sm.raftLog.committed, 1)
+	if sm.RaftLog.committed != 1 {
+		t.Errorf("committed = %d, want %d", sm.RaftLog.committed, 1)
 	}
 
 	// network recovery
@@ -418,8 +418,8 @@ func TestCannotCommitWithoutNewTermEntry(t *testing.T) {
 
 	// no log entries from previous term should be committed
 	sm = tt.peers[2].(*raft)
-	if sm.raftLog.committed != 1 {
-		t.Errorf("committed = %d, want %d", sm.raftLog.committed, 1)
+	if sm.RaftLog.committed != 1 {
+		t.Errorf("committed = %d, want %d", sm.RaftLog.committed, 1)
 	}
 
 	tt.recover()
@@ -428,8 +428,8 @@ func TestCannotCommitWithoutNewTermEntry(t *testing.T) {
 	// append an entry at current term
 	tt.send(pb.Message{From: 2, To: 2, Type: pb.MsgProp, Entries: []pb.Entry{{Data: []byte("some data")}}})
 	// expect the committed to be advanced
-	if sm.raftLog.committed != 5 {
-		t.Errorf("committed = %d, want %d", sm.raftLog.committed, 5)
+	if sm.RaftLog.committed != 5 {
+		t.Errorf("committed = %d, want %d", sm.RaftLog.committed, 5)
 	}
 }
 
@@ -448,8 +448,8 @@ func TestCommitWithoutNewTermEntry(t *testing.T) {
 	tt.send(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{Data: []byte("some data")}}})
 
 	sm := tt.peers[1].(*raft)
-	if sm.raftLog.committed != 1 {
-		t.Errorf("committed = %d, want %d", sm.raftLog.committed, 1)
+	if sm.RaftLog.committed != 1 {
+		t.Errorf("committed = %d, want %d", sm.RaftLog.committed, 1)
 	}
 
 	// network recovery
@@ -460,8 +460,8 @@ func TestCommitWithoutNewTermEntry(t *testing.T) {
 	// should be committed
 	tt.send(pb.Message{From: 2, To: 2, Type: pb.MsgHup})
 
-	if sm.raftLog.committed != 4 {
-		t.Errorf("committed = %d, want %d", sm.raftLog.committed, 4)
+	if sm.RaftLog.committed != 4 {
+		t.Errorf("committed = %d, want %d", sm.RaftLog.committed, 4)
 	}
 }
 
@@ -504,7 +504,7 @@ func TestDuelingCandidates(t *testing.T) {
 		}
 		base := ltoa(tt.raftLog)
 		if sm, ok := nt.peers[1+uint64(i)].(*raft); ok {
-			l := ltoa(sm.raftLog)
+			l := ltoa(sm.RaftLog)
 			if g := diffu(base, l); g != "" {
 				t.Errorf("#%d: diff:\n%s", i, g)
 			}
@@ -548,7 +548,7 @@ func TestCandidateConcede(t *testing.T) {
 	})
 	for i, p := range tt.peers {
 		if sm, ok := p.(*raft); ok {
-			l := ltoa(sm.raftLog)
+			l := ltoa(sm.RaftLog)
 			if g := diffu(wantLog, l); g != "" {
 				t.Errorf("#%d: diff:\n%s", i, g)
 			}
@@ -593,7 +593,7 @@ func TestOldMessages(t *testing.T) {
 	base := ltoa(ilog)
 	for i, p := range tt.peers {
 		if sm, ok := p.(*raft); ok {
-			l := ltoa(sm.raftLog)
+			l := ltoa(sm.RaftLog)
 			if g := diffu(base, l); g != "" {
 				t.Errorf("#%d: diff:\n%s", i, g)
 			}
@@ -650,7 +650,7 @@ func TestProposal(t *testing.T) {
 		base := ltoa(wantLog)
 		for i, p := range tt.peers {
 			if sm, ok := p.(*raft); ok {
-				l := ltoa(sm.raftLog)
+				l := ltoa(sm.RaftLog)
 				if g := diffu(base, l); g != "" {
 					t.Errorf("#%d: diff:\n%s", i, g)
 				}
@@ -688,7 +688,7 @@ func TestProposalByProxy(t *testing.T) {
 		base := ltoa(wantLog)
 		for i, p := range tt.peers {
 			if sm, ok := p.(*raft); ok {
-				l := ltoa(sm.raftLog)
+				l := ltoa(sm.RaftLog)
 				if g := diffu(base, l); g != "" {
 					t.Errorf("#%d: diff:\n%s", i, g)
 				}
@@ -741,7 +741,7 @@ func TestCommit(t *testing.T) {
 			sm.setProgress(uint64(j)+1, tt.matches[j], tt.matches[j]+1)
 		}
 		sm.maybeCommit()
-		if g := sm.raftLog.committed; g != tt.w {
+		if g := sm.RaftLog.committed; g != tt.w {
 			t.Errorf("#%d: committed = %d, want %d", i, g, tt.w)
 		}
 	}
@@ -832,11 +832,11 @@ func TestHandleMsgApp(t *testing.T) {
 		sm.becomeFollower(2, None)
 
 		sm.handleAppendEntries(tt.m)
-		if sm.raftLog.lastIndex() != tt.wIndex {
-			t.Errorf("#%d: lastIndex = %d, want %d", i, sm.raftLog.lastIndex(), tt.wIndex)
+		if sm.RaftLog.lastIndex() != tt.wIndex {
+			t.Errorf("#%d: lastIndex = %d, want %d", i, sm.RaftLog.lastIndex(), tt.wIndex)
 		}
-		if sm.raftLog.committed != tt.wCommit {
-			t.Errorf("#%d: committed = %d, want %d", i, sm.raftLog.committed, tt.wCommit)
+		if sm.RaftLog.committed != tt.wCommit {
+			t.Errorf("#%d: committed = %d, want %d", i, sm.RaftLog.committed, tt.wCommit)
 		}
 		m := sm.readMessages()
 		if len(m) != 1 {
@@ -864,10 +864,10 @@ func TestHandleHeartbeat(t *testing.T) {
 		storage.Append([]pb.Entry{{Index: 1, Term: 1}, {Index: 2, Term: 2}, {Index: 3, Term: 3}})
 		sm := newTestRaft(1, []uint64{1, 2}, 5, 1, storage)
 		sm.becomeFollower(2, 2)
-		sm.raftLog.commitTo(commit)
+		sm.RaftLog.commitTo(commit)
 		sm.handleHeartbeat(tt.m)
-		if sm.raftLog.committed != tt.wCommit {
-			t.Errorf("#%d: committed = %d, want %d", i, sm.raftLog.committed, tt.wCommit)
+		if sm.RaftLog.committed != tt.wCommit {
+			t.Errorf("#%d: committed = %d, want %d", i, sm.RaftLog.committed, tt.wCommit)
 		}
 		m := sm.readMessages()
 		if len(m) != 1 {
@@ -886,7 +886,7 @@ func TestHandleHeartbeatResp(t *testing.T) {
 	sm := newTestRaft(1, []uint64{1, 2}, 5, 1, storage)
 	sm.becomeCandidate()
 	sm.becomeLeader()
-	sm.raftLog.commitTo(sm.raftLog.lastIndex())
+	sm.RaftLog.commitTo(sm.RaftLog.lastIndex())
 
 	// A heartbeat response from a node that is behind; re-send MsgApp
 	sm.Step(pb.Message{From: 2, Type: pb.MsgHeartbeatResp})
@@ -957,8 +957,8 @@ func TestMsgAppRespWaitReset(t *testing.T) {
 		Type:  pb.MsgAppResp,
 		Index: 1,
 	})
-	if sm.raftLog.committed != 1 {
-		t.Fatalf("expected committed to be 1, got %d", sm.raftLog.committed)
+	if sm.RaftLog.committed != 1 {
+		t.Fatalf("expected committed to be 1, got %d", sm.RaftLog.committed)
 	}
 	// Also consume the MsgApp messages that update Commit on the followers.
 	sm.readMessages()
@@ -1047,7 +1047,7 @@ func TestRecvMsgVote(t *testing.T) {
 			sm.step = stepLeader
 		}
 		sm.Vote = tt.voteFor
-		sm.raftLog = &raftLog{
+		sm.RaftLog = &raftLog{
 			storage:  &MemoryStorage{ents: []pb.Entry{{}, {Index: 1, Term: 2}, {Index: 2, Term: 2}}},
 			unstable: unstable{offset: 3},
 		}
@@ -1155,11 +1155,11 @@ func TestAllServerStepdown(t *testing.T) {
 			if sm.Term != tt.wterm {
 				t.Errorf("#%d.%d term = %v , want %v", i, j, sm.Term, tt.wterm)
 			}
-			if uint64(sm.raftLog.lastIndex()) != tt.windex {
-				t.Errorf("#%d.%d index = %v , want %v", i, j, sm.raftLog.lastIndex(), tt.windex)
+			if uint64(sm.RaftLog.lastIndex()) != tt.windex {
+				t.Errorf("#%d.%d index = %v , want %v", i, j, sm.RaftLog.lastIndex(), tt.windex)
 			}
-			if uint64(len(sm.raftLog.allEntries())) != tt.windex {
-				t.Errorf("#%d.%d len(ents) = %v , want %v", i, j, len(sm.raftLog.allEntries()), tt.windex)
+			if uint64(len(sm.RaftLog.allEntries())) != tt.windex {
+				t.Errorf("#%d.%d len(ents) = %v , want %v", i, j, len(sm.RaftLog.allEntries()), tt.windex)
 			}
 			wlead := uint64(2)
 			if msgType == pb.MsgVote {
@@ -1230,7 +1230,7 @@ func TestLeaderAppResp(t *testing.T) {
 		// sm term is 1 after it becomes the leader.
 		// thus the last log term must be 1 to be committed.
 		sm := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
-		sm.raftLog = &raftLog{
+		sm.RaftLog = &raftLog{
 			storage:  &MemoryStorage{ents: []pb.Entry{{}, {Index: 1, Term: 0}, {Index: 2, Term: 1}}},
 			unstable: unstable{offset: 3},
 		}
@@ -1288,7 +1288,7 @@ func TestBcastBeat(t *testing.T) {
 	// slow follower
 	sm.prs[2].Match, sm.prs[2].Next = 5, 6
 	// normal follower
-	sm.prs[3].Match, sm.prs[3].Next = sm.raftLog.lastIndex(), sm.raftLog.lastIndex()+1
+	sm.prs[3].Match, sm.prs[3].Next = sm.RaftLog.lastIndex(), sm.RaftLog.lastIndex()+1
 
 	sm.Step(pb.Message{Type: pb.MsgBeat})
 	msgs := sm.readMessages()
@@ -1296,8 +1296,8 @@ func TestBcastBeat(t *testing.T) {
 		t.Fatalf("len(msgs) = %v, want 2", len(msgs))
 	}
 	wantCommitMap := map[uint64]uint64{
-		2: min(sm.raftLog.committed, sm.prs[2].Match),
-		3: min(sm.raftLog.committed, sm.prs[3].Match),
+		2: min(sm.RaftLog.committed, sm.prs[2].Match),
+		3: min(sm.RaftLog.committed, sm.prs[3].Match),
 	}
 	for i, m := range msgs {
 		if m.Type != pb.MsgHeartbeat {
@@ -1337,7 +1337,7 @@ func TestRecvMsgBeat(t *testing.T) {
 
 	for i, tt := range tests {
 		sm := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
-		sm.raftLog = &raftLog{storage: &MemoryStorage{ents: []pb.Entry{{}, {Index: 1, Term: 0}, {Index: 2, Term: 1}}}}
+		sm.RaftLog = &raftLog{storage: &MemoryStorage{ents: []pb.Entry{{}, {Index: 1, Term: 0}, {Index: 2, Term: 1}}}}
 		sm.Term = 1
 		sm.state = tt.state
 		switch tt.state {
@@ -1380,7 +1380,7 @@ func TestLeaderIncreaseNext(t *testing.T) {
 
 	for i, tt := range tests {
 		sm := newTestRaft(1, []uint64{1, 2}, 10, 1, NewMemoryStorage())
-		sm.raftLog.append(previousEnts...)
+		sm.RaftLog.append(previousEnts...)
 		sm.becomeCandidate()
 		sm.becomeLeader()
 		sm.prs[2].State = tt.state
@@ -1512,11 +1512,11 @@ func TestRestore(t *testing.T) {
 		t.Fatal("restore fail, want succeed")
 	}
 
-	if sm.raftLog.lastIndex() != s.Metadata.Index {
-		t.Errorf("log.lastIndex = %d, want %d", sm.raftLog.lastIndex(), s.Metadata.Index)
+	if sm.RaftLog.lastIndex() != s.Metadata.Index {
+		t.Errorf("log.lastIndex = %d, want %d", sm.RaftLog.lastIndex(), s.Metadata.Index)
 	}
-	if mustTerm(sm.raftLog.term(s.Metadata.Index)) != s.Metadata.Term {
-		t.Errorf("log.lastTerm = %d, want %d", mustTerm(sm.raftLog.term(s.Metadata.Index)), s.Metadata.Term)
+	if mustTerm(sm.RaftLog.term(s.Metadata.Index)) != s.Metadata.Term {
+		t.Errorf("log.lastTerm = %d, want %d", mustTerm(sm.RaftLog.term(s.Metadata.Index)), s.Metadata.Term)
 	}
 	sg := sm.nodes()
 	if !reflect.DeepEqual(sg, s.Metadata.ConfState.Nodes) {
@@ -1533,8 +1533,8 @@ func TestRestoreIgnoreSnapshot(t *testing.T) {
 	commit := uint64(1)
 	storage := NewMemoryStorage()
 	sm := newTestRaft(1, []uint64{1, 2}, 10, 1, storage)
-	sm.raftLog.append(previousEnts...)
-	sm.raftLog.commitTo(commit)
+	sm.RaftLog.append(previousEnts...)
+	sm.RaftLog.commitTo(commit)
 
 	s := pb.Snapshot{
 		Metadata: pb.SnapshotMetadata{
@@ -1548,8 +1548,8 @@ func TestRestoreIgnoreSnapshot(t *testing.T) {
 	if ok := sm.restore(s); ok {
 		t.Errorf("restore = %t, want %t", ok, false)
 	}
-	if sm.raftLog.committed != commit {
-		t.Errorf("commit = %d, want %d", sm.raftLog.committed, commit)
+	if sm.RaftLog.committed != commit {
+		t.Errorf("commit = %d, want %d", sm.RaftLog.committed, commit)
 	}
 
 	// ignore snapshot and fast forward commit
@@ -1557,8 +1557,8 @@ func TestRestoreIgnoreSnapshot(t *testing.T) {
 	if ok := sm.restore(s); ok {
 		t.Errorf("restore = %t, want %t", ok, false)
 	}
-	if sm.raftLog.committed != commit+1 {
-		t.Errorf("commit = %d, want %d", sm.raftLog.committed, commit+1)
+	if sm.RaftLog.committed != commit+1 {
+		t.Errorf("commit = %d, want %d", sm.RaftLog.committed, commit+1)
 	}
 }
 
@@ -1579,7 +1579,7 @@ func TestProvideSnap(t *testing.T) {
 	sm.becomeLeader()
 
 	// force set the next of node 2, so that node 2 needs a snapshot
-	sm.prs[2].Next = sm.raftLog.firstIndex()
+	sm.prs[2].Next = sm.RaftLog.firstIndex()
 	sm.Step(pb.Message{From: 2, To: 1, Type: pb.MsgAppResp, Index: sm.prs[2].Next - 1, Reject: true})
 
 	msgs := sm.readMessages()
@@ -1610,7 +1610,7 @@ func TestIgnoreProvidingSnap(t *testing.T) {
 
 	// force set the next of node 2, so that node 2 needs a snapshot
 	// change node 2 to be inactive, expect node 1 ignore sending snapshot to 2
-	sm.prs[2].Next = sm.raftLog.firstIndex() - 1
+	sm.prs[2].Next = sm.RaftLog.firstIndex() - 1
 	sm.prs[2].RecentActive = false
 
 	sm.Step(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{Data: []byte("somedata")}}})
@@ -1647,8 +1647,8 @@ func TestSlowNodeRestore(t *testing.T) {
 	}
 	lead := nt.peers[1].(*raft)
 	nextEnts(lead, nt.storage[1])
-	nt.storage[1].CreateSnapshot(lead.raftLog.applied, &pb.ConfState{Nodes: lead.nodes()}, nil)
-	nt.storage[1].Compact(lead.raftLog.applied)
+	nt.storage[1].CreateSnapshot(lead.RaftLog.applied, &pb.ConfState{Nodes: lead.nodes()}, nil)
+	nt.storage[1].Compact(lead.RaftLog.applied)
 
 	nt.recover()
 	// send heartbeats so that the leader can learn everyone is active.
@@ -1667,8 +1667,8 @@ func TestSlowNodeRestore(t *testing.T) {
 
 	// trigger a commit
 	nt.send(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{}}})
-	if follower.raftLog.committed != lead.raftLog.committed {
-		t.Errorf("follower.committed = %d, want %d", follower.raftLog.committed, lead.raftLog.committed)
+	if follower.RaftLog.committed != lead.RaftLog.committed {
+		t.Errorf("follower.committed = %d, want %d", follower.RaftLog.committed, lead.RaftLog.committed)
 	}
 }
 
@@ -1679,9 +1679,9 @@ func TestStepConfig(t *testing.T) {
 	r := newTestRaft(1, []uint64{1, 2}, 10, 1, NewMemoryStorage())
 	r.becomeCandidate()
 	r.becomeLeader()
-	index := r.raftLog.lastIndex()
+	index := r.RaftLog.lastIndex()
 	r.Step(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{Type: pb.EntryConfChange}}})
-	if g := r.raftLog.lastIndex(); g != index+1 {
+	if g := r.RaftLog.lastIndex(); g != index+1 {
 		t.Errorf("index = %d, want %d", g, index+1)
 	}
 	if r.pendingConf != true {
@@ -1698,11 +1698,11 @@ func TestStepIgnoreConfig(t *testing.T) {
 	r.becomeCandidate()
 	r.becomeLeader()
 	r.Step(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{Type: pb.EntryConfChange}}})
-	index := r.raftLog.lastIndex()
+	index := r.RaftLog.lastIndex()
 	pendingConf := r.pendingConf
 	r.Step(pb.Message{From: 1, To: 1, Type: pb.MsgProp, Entries: []pb.Entry{{Type: pb.EntryConfChange}}})
 	wents := []pb.Entry{{Type: pb.EntryNormal, Term: 1, Index: 3, Data: nil}}
-	ents, err := r.raftLog.entries(index+1, noLimit)
+	ents, err := r.RaftLog.entries(index+1, noLimit)
 	if err != nil {
 		t.Fatalf("unexpected error %v", err)
 	}
@@ -1872,7 +1872,7 @@ func TestCommitAfterRemoveNode(t *testing.T) {
 	if ents := nextEnts(r, s); len(ents) > 0 {
 		t.Fatalf("unexpected committed entries: %v", ents)
 	}
-	ccIndex := r.raftLog.lastIndex()
+	ccIndex := r.RaftLog.lastIndex()
 
 	// While the config change is pending, make another proposal.
 	r.Step(pb.Message{

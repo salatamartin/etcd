@@ -19,12 +19,8 @@
 */
 package raftpb
 
-import (
-	"fmt"
-
-	proto "github.com/coreos/etcd/Godeps/_workspace/src/github.com/gogo/protobuf/proto"
-)
-
+import proto "github.com/coreos/etcd/Godeps/_workspace/src/github.com/gogo/protobuf/proto"
+import fmt "fmt"
 import math "math"
 
 import io "io"
@@ -70,19 +66,22 @@ func (x *EntryType) UnmarshalJSON(data []byte) error {
 type MessageType int32
 
 const (
-	MsgHup           MessageType = 0
-	MsgBeat          MessageType = 1
-	MsgProp          MessageType = 2
-	MsgApp           MessageType = 3
-	MsgAppResp       MessageType = 4
-	MsgVote          MessageType = 5
-	MsgVoteResp      MessageType = 6
-	MsgSnap          MessageType = 7
-	MsgHeartbeat     MessageType = 8
-	MsgHeartbeatResp MessageType = 9
-	MsgUnreachable   MessageType = 10
-	MsgSnapStatus    MessageType = 11
-	MsgCheckQuorum   MessageType = 12
+	MsgHup             MessageType = 0
+	MsgBeat            MessageType = 1
+	MsgProp            MessageType = 2
+	MsgApp             MessageType = 3
+	MsgAppResp         MessageType = 4
+	MsgVote            MessageType = 5
+	MsgVoteResp        MessageType = 6
+	MsgSnap            MessageType = 7
+	MsgHeartbeat       MessageType = 8
+	MsgHeartbeatResp   MessageType = 9
+	MsgUnreachable     MessageType = 10
+	MsgSnapStatus      MessageType = 11
+	MsgCheckQuorum     MessageType = 12
+	MsgLocalStoreReq   MessageType = 13
+	MsgLocalStoreMerge MessageType = 14
+	MsgLocalStoreResp  MessageType = 15
 )
 
 var MessageType_name = map[int32]string{
@@ -99,21 +98,27 @@ var MessageType_name = map[int32]string{
 	10: "MsgUnreachable",
 	11: "MsgSnapStatus",
 	12: "MsgCheckQuorum",
+	13: "MsgLocalStoreReq",
+	14: "MsgLocalStoreMerge",
+	15: "MsgLocalStoreResp",
 }
 var MessageType_value = map[string]int32{
-	"MsgHup":           0,
-	"MsgBeat":          1,
-	"MsgProp":          2,
-	"MsgApp":           3,
-	"MsgAppResp":       4,
-	"MsgVote":          5,
-	"MsgVoteResp":      6,
-	"MsgSnap":          7,
-	"MsgHeartbeat":     8,
-	"MsgHeartbeatResp": 9,
-	"MsgUnreachable":   10,
-	"MsgSnapStatus":    11,
-	"MsgCheckQuorum":   12,
+	"MsgHup":             0,
+	"MsgBeat":            1,
+	"MsgProp":            2,
+	"MsgApp":             3,
+	"MsgAppResp":         4,
+	"MsgVote":            5,
+	"MsgVoteResp":        6,
+	"MsgSnap":            7,
+	"MsgHeartbeat":       8,
+	"MsgHeartbeatResp":   9,
+	"MsgUnreachable":     10,
+	"MsgSnapStatus":      11,
+	"MsgCheckQuorum":     12,
+	"MsgLocalStoreReq":   13,
+	"MsgLocalStoreMerge": 14,
+	"MsgLocalStoreResp":  15,
 }
 
 func (x MessageType) Enum() *MessageType {

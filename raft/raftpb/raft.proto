@@ -46,6 +46,9 @@ enum MessageType {
 	MsgUnreachable     = 10;
 	MsgSnapStatus      = 11;
 	MsgCheckQuorum     = 12;
+	MsgLocalStoreReq   = 13;
+	MsgLocalStoreMerge = 14;
+	MsgLocalStoreResp  = 15;
 }
 
 message Message {

@@ -97,9 +97,10 @@ func init() {
 }
 
 type Response struct {
-	Event   *store.Event
-	Watcher store.Watcher
-	err     error
+	Event            *store.Event
+	Watcher          store.Watcher
+	NoQuorumResponse string
+	err              error
 }
 
 type Server interface {
@@ -738,6 +739,26 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 		if err != nil {
 			return Response{}, err
 		}
+
+		if r.Method == "PUT" && r.NoPutQuorum{
+			entry := &raftpb.Entry{
+				Term:  s.Term(),
+				Index: s.Index(),
+				Data:  data,
+			}
+			plog.Infof("NQPUT request received: %v", r)
+			ok, err := s.r.Raft().RaftLog.Localstore.MaybeAdd(entry)
+			if err != nil {
+				return Response{}, err
+			}
+
+			if ok {
+				return Response{NoQuorumResponse: "Request has been saved to local log, will be processed ASAP"}, nil
+			} else {
+				return Response{NoQuorumResponse: "Request has not been saved, newer is already saved"}, nil
+			}
+		}
+
 		ch := s.w.Register(r.ID)
 
 		// TODO: benchmark the cost of time.Now()

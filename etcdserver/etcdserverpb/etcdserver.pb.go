@@ -53,12 +53,8 @@
 */
 package etcdserverpb
 
-import (
-	"fmt"
-
-	proto "github.com/coreos/etcd/Godeps/_workspace/src/github.com/gogo/protobuf/proto"
-)
-
+import proto "github.com/coreos/etcd/Godeps/_workspace/src/github.com/gogo/protobuf/proto"
+import fmt "fmt"
 import math "math"
 
 import io "io"
@@ -86,6 +82,7 @@ type Request struct {
 	Time             int64  `protobuf:"varint,15,opt,name=Time" json:"Time"`
 	Stream           bool   `protobuf:"varint,16,opt,name=Stream" json:"Stream"`
 	Blocking         bool   `protobuf:"varint,17,opt,name=Blocking" json:"Blocking"`
+	NoPutQuorum      bool   `protobuf:"varint,18,opt,name=NoPutQuorum" json:"NoPutQuorum"`
 	XXX_unrecognized []byte `json:"-"`
 }
 
@@ -223,6 +220,16 @@ func (m *Request) MarshalTo(data []byte) (int, error) {
 		data[i] = 0
 	}
 	i++
+	data[i] = 0x90
+	i++
+	data[i] = 0x1
+	i++
+	if m.NoPutQuorum {
+		data[i] = 1
+	} else {
+		data[i] = 0
+	}
+	i++
 	if m.XXX_unrecognized != nil {
 		i += copy(data[i:], m.XXX_unrecognized)
 	}
@@ -307,6 +314,7 @@ func (m *Request) Size() (n int) {
 	n += 2
 	n += 2
 	n += 1 + sovEtcdserver(uint64(m.Time))
+	n += 3
 	n += 3
 	n += 3
 	if m.XXX_unrecognized != nil {
@@ -740,6 +748,26 @@ func (m *Request) Unmarshal(data []byte) error {
 				}
 			}
 			m.Blocking = bool(v != 0)
+		case 18:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NoPutQuorum", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowEtcdserver
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := data[iNdEx]
+				iNdEx++
+				v |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.NoPutQuorum = bool(v != 0)
 		default:
 			iNdEx = preIndex
 			skippy, err := skipEtcdserver(data[iNdEx:])
