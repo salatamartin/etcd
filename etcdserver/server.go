@@ -741,7 +741,7 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 		}
 
 		if r.Method == "PUT" && r.NoPutQuorum{
-			entry := &raftpb.Entry{
+			entry := raftpb.Entry{
 				Term:  s.Term(),
 				Index: s.Index(),
 				Data:  data,

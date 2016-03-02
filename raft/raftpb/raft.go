@@ -21,8 +21,9 @@ func (e *Entry) RetrieveMessage() serverpb.Request {
 
 //returns true if messages have same method and same key
 //TODO: consider only PUT requests without prevValue
-func (e *Entry) CompareMessage(e2 *Entry) bool {
+func (e *Entry) CompareMessage(e2 Entry) bool {
 	req1 := e.RetrieveMessage()
 	req2 := e2.RetrieveMessage()
 	return req1.Method == req2.Method && req1.Path == req2.Path
 }
+

@@ -28,8 +28,8 @@ import (
 	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
 	//serverpb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	//"github.com/coreos/etcd/pkg/pbutil"
-	pb "github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
+	pb "github.com/coreos/etcd/raft/raftpb"
 )
 
 // None is a placeholder node ID used when there is no leader.
@@ -161,29 +161,29 @@ func (c *Config) validate() error {
 }
 
 type raft struct {
-	id              uint64
+	id uint64
 
-	Term            uint64
-	Vote            uint64
+	Term uint64
+	Vote uint64
 
 	// the log
-	RaftLog         *raftLog
+	RaftLog *raftLog
 
-	maxInflight     int
-	maxMsgSize      uint64
-	prs             map[uint64]*Progress
+	maxInflight int
+	maxMsgSize  uint64
+	prs         map[uint64]*Progress
 
-	state           StateType
+	state StateType
 
-	votes           map[uint64]bool
+	votes map[uint64]bool
 
-	msgs            []pb.Message
+	msgs []pb.Message
 
 	// the leader id
-	lead            uint64
+	lead uint64
 
 	// New configuration is ignored if there exists unapplied configuration.
-	pendingConf     bool
+	pendingConf bool
 
 	// number of ticks since it reached last electionTimeout when it is leader
 	// or candidate.
@@ -584,7 +584,7 @@ func (r *raft) Step(m pb.Message) error {
 
 	switch {
 	case m.Term == 0:
-		// local message
+	// local message
 	case m.Term > r.Term:
 		lead := m.From
 		if m.Type == pb.MsgVote {
@@ -646,6 +646,20 @@ func stepLeader(r *raft, m pb.Message) {
 		r.logger.Infof("%x [logterm: %d, index: %d, vote: %x] rejected vote from %x [logterm: %d, index: %d] at term %d",
 			r.id, r.RaftLog.lastTerm(), r.RaftLog.lastIndex(), r.Vote, m.From, m.LogTerm, m.Index, r.Term)
 		r.send(pb.Message{To: m.From, Type: pb.MsgVoteResp, Reject: true})
+		return
+	case pb.MsgLocalStoreMerge:
+		plog.Infof("Received local store from %x to merge: %v", m.From, m.Entries)
+		go func(m pb.Message) {
+			r.RaftLog.Localstore.Merge(m.Entries)
+			response := pb.Message{
+				Type:  pb.MsgLocalStoreResp,
+				To:    m.From,
+				Index: m.Index,
+			}
+			r.send(response)
+		}(m)
+
+		//plog.Infof("Leader's localStore after merge: %v", m.Entries)
 		return
 	}
 
@@ -775,6 +789,9 @@ func stepFollower(r *raft, m pb.Message) {
 		r.electionElapsed = 0
 		r.lead = m.From
 		r.handleHeartbeat(m)
+		if len(r.RaftLog.Localstore.Entries()) == 0 {
+			break
+		}
 		//TODO: handle localstore
 		//TODO: implement timeout (we don't want to send the same entries every heartbeat)
 		var ctx context.Context
@@ -785,13 +802,15 @@ func stepFollower(r *raft, m pb.Message) {
 			ctx, cancel = context.WithTimeout(context.Background(), pushLocalStoreDeadline)
 			r.RaftLog.Localstore.SetContext(ctx, cancel)
 			//TODO: push entries from here
-
+			r.pushLocalStore(m.From)
 		} else {
 			select {
 			case <-ctx.Done():
 				plog.Infof("Deadline for LocalStore response is finished")
+				plog.Infof("Context is %v", ctx)
 				cancel()
-				ctx = nil
+				r.RaftLog.Localstore.SetContext(nil, nil)
+				r.RaftLog.Localstore.SetLastSent(0)
 			default:
 			}
 		}
@@ -809,6 +828,12 @@ func stepFollower(r *raft, m pb.Message) {
 			r.logger.Infof("%x [logterm: %d, index: %d, vote: %x] rejected vote from %x [logterm: %d, index: %d] at term %d",
 				r.id, r.RaftLog.lastTerm(), r.RaftLog.lastIndex(), r.Vote, m.From, m.LogTerm, m.Index, r.Term)
 			r.send(pb.Message{To: m.From, Type: pb.MsgVoteResp, Reject: true})
+		}
+	case pb.MsgLocalStoreResp:
+		if m.Index == r.RaftLog.Localstore.LastSent() {
+			plog.Infof("Received MsfLocalStoreResp with valid lastSent, removing entries from local log")
+			r.RaftLog.Localstore.TrimWithLastSent()
+			r.RaftLog.Localstore.SetContext(nil, nil)
 		}
 	}
 }
@@ -956,4 +981,18 @@ func (r *raft) checkQuorumActive() bool {
 	}
 	//plog.Infof("checkQuorumActive is %s", act >= r.quorum())
 	return act >= r.quorum()
+}
+
+func (r *raft) pushLocalStore(to uint64) {
+	ents := r.RaftLog.Localstore.Entries()
+	r.RaftLog.Localstore.SetLastSent(uint64(len(ents)))
+	//TODO: is term and index here necessary?
+	m := pb.Message{
+		Type:    pb.MsgLocalStoreMerge,
+		To:      to,
+		From:    r.id,
+		Entries: ents,
+		Index:   r.RaftLog.Localstore.LastSent(),
+	}
+	r.send(m)
 }
