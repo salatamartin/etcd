@@ -68,6 +68,8 @@ const (
 	// (since it will timeout).
 	monitorVersionInterval = rafthttp.ConnWriteTimeout - time.Second
 
+	monitorLocalStoreInterval = 5 * time.Second
+
 	databaseFilename = "db"
 	// max number of in-flight snapshot messages etcdserver allows to have
 	// This number is more than enough for most clusters with 5 machines.
@@ -412,6 +414,7 @@ func (s *EtcdServer) Start() {
 	go s.purgeFile()
 	go monitorFileDescriptor(s.done)
 	go s.monitorVersions()
+	go s.monitorLocalStore()
 }
 
 // start prepares and starts server in a new goroutine. It is no longer safe to
@@ -745,7 +748,7 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 				Term:      s.Term(),
 				Index:     s.Index(),
 				Timestamp: raftpb.NewTimestamp(),
-				Receiver:  s.ID(),
+				Receiver:  uint64(s.ID()),
 				Data:      data,
 			}
 			plog.Infof("NQPUT request received: %v", r)
@@ -1344,3 +1347,53 @@ func (s *EtcdServer) parseProposeCtxErr(err error, start time.Time) error {
 }
 
 func (s *EtcdServer) getKV() dstorage.ConsistentWatchableKV { return s.kv }
+
+func (s *EtcdServer) monitorLocalStore() {
+	for {
+		select {
+		case <-time.After(monitorLocalStoreInterval):
+		case <-s.done:
+			return
+		}
+
+		lStore := &s.r.Raft().RaftLog.Localstore
+
+		//wait until localstore is initialised
+		if lStore == nil {
+			continue
+		}
+
+		//nothing to do if no local entries
+		if len((*lStore).Entries()) == 0 {
+			continue
+		}
+
+		//cycle until lStore is empty
+		ctx, cancel := context.WithCancel(context.Background())
+		for len((*lStore).Entries()) != 0 {
+			toCommit := (*lStore).Entries()[0]
+			message := toCommit.RetrieveMessage()
+			message.NoQuorumPut = false
+			message.Blocking = true
+			message.Quorum = true
+			_, err := s.Do(ctx, message)
+			if err != nil{
+				continue
+			}
+			(*lStore).RemoveFirst(1)
+
+			response := raftpb.Message{
+				Type:   raftpb.MsgLocalStoreCommited,
+				To:     toCommit.Receiver,
+				From:   uint64(s.ID()),
+				Term:   s.Term(),
+				Index:  s.Index(),
+				Commit: uint64(toCommit.Timestamp),
+			}
+			//TODO: send ack to original receiver of NQPUT version of this message
+			s.r.Raft().AddMsgToSend(response)
+		}
+		cancel()
+	}
+
+}

@@ -30,6 +30,7 @@ import (
 	//"github.com/coreos/etcd/pkg/pbutil"
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	pb "github.com/coreos/etcd/raft/raftpb"
+	"time"
 )
 
 // None is a placeholder node ID used when there is no leader.
@@ -662,6 +663,9 @@ func stepLeader(r *raft, m pb.Message) {
 
 		//plog.Infof("Leader's localStore after merge: %v", m.Entries)
 		return
+	case pb.MsgLocalStoreCommited:
+		handleMsgLocalStoreCommited(r, m)
+		return
 	}
 
 	// All other message types require a progress for m.From (pr).
@@ -739,6 +743,16 @@ func stepLeader(r *raft, m pb.Message) {
 			pr.becomeProbe()
 		}
 		r.logger.Debugf("%x failed to send message to %x because it is unreachable [%s]", r.id, m.From, pr)
+	}
+}
+
+func handleMsgLocalStoreCommited(r *raft, m pb.Message) {
+	e := r.RaftLog.Localstore.RemoveFromWaiting(int64(m.Commit))
+	plog.Infof("Received MsgLocalStoreCommited message, with timestamp of committed message %v", time.Unix(0, int64(m.Commit)))
+	if e != nil {
+		plog.Infof("Entry %s successfully commited with quorum, removing from peristent storage", e.Print())
+	} else {
+		plog.Infof("Entry with given timestamp not found!")
 	}
 }
 
@@ -832,10 +846,12 @@ func stepFollower(r *raft, m pb.Message) {
 		}
 	case pb.MsgLocalStoreResp:
 		if m.Index == r.RaftLog.Localstore.LastSent() {
-			plog.Infof("Received MsfLocalStoreResp with valid lastSent, removing entries from local log")
+			plog.Infof("Received MsfLocalStoreResp with valid lastSent, moving log to waitingForCommit")
 			r.RaftLog.Localstore.TrimWithLastSent()
 			r.RaftLog.Localstore.SetContext(nil, nil)
 		}
+	case pb.MsgLocalStoreCommited:
+		handleMsgLocalStoreCommited(r, m)
 	}
 }
 
@@ -995,5 +1011,9 @@ func (r *raft) pushLocalStore(to uint64) {
 		Entries: ents,
 		Index:   r.RaftLog.Localstore.LastSent(),
 	}
+	r.send(m)
+}
+
+func (r *raft) AddMsgToSend(m pb.Message) {
 	r.send(m)
 }
