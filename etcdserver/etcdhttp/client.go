@@ -605,21 +605,21 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 	}
 
 	rr := etcdserverpb.Request{
-		Method:    r.Method,
-		Path:      p,
-		Val:       r.FormValue("value"),
-		Dir:       dir,
-		PrevValue: pV,
-		PrevIndex: pIdx,
-		PrevExist: pe,
-		Wait:      wait,
-		Since:     wIdx,
-		Recursive: rec,
-		Sorted:    sort,
-		Quorum:    quorum,
-		Stream:    stream,
-		Blocking:  blocking,
-		NoPutQuorum:noputquorum,
+		Method:      r.Method,
+		Path:        p,
+		Val:         r.FormValue("value"),
+		Dir:         dir,
+		PrevValue:   pV,
+		PrevIndex:   pIdx,
+		PrevExist:   pe,
+		Wait:        wait,
+		Since:       wIdx,
+		Recursive:   rec,
+		Sorted:      sort,
+		Quorum:      quorum,
+		Stream:      stream,
+		Blocking:    blocking,
+		NoPutQuorum: noputquorum,
 	}
 
 	if pe != nil {
