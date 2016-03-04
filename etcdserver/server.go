@@ -740,15 +740,18 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 			return Response{}, err
 		}
 
-		if r.Method == "PUT" && r.NoPutQuorum{
+		if r.Method == "PUT" && r.NoQuorumPut {
 			entry := raftpb.Entry{
-				Term:  s.Term(),
-				Index: s.Index(),
-				Data:  data,
+				Term:      s.Term(),
+				Index:     s.Index(),
+				Timestamp: raftpb.NewTimestamp(),
+				Receiver:  s.ID(),
+				Data:      data,
 			}
 			plog.Infof("NQPUT request received: %v", r)
 			ok, err := s.r.Raft().RaftLog.Localstore.MaybeAdd(entry)
 			if err != nil {
+				plog.Infof("Error during MaybeAdd, error: %s", err.Error())
 				return Response{}, err
 			}
 
