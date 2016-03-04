@@ -189,6 +189,7 @@ func RestartNode(c *Config) Node {
 	r := newRaft(c)
 
 	n := newNode()
+	n.raft = r
 	go n.run(r)
 	return &n
 }

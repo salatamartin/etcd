@@ -648,7 +648,7 @@ func stepLeader(r *raft, m pb.Message) {
 		r.send(pb.Message{To: m.From, Type: pb.MsgVoteResp, Reject: true})
 		return
 	case pb.MsgLocalStoreMerge:
-		plog.Infof("Received local store from %x to merge: %v", m.From, m.Entries)
+		plog.Infof("Received local store from %x to merge: %s", m.From, FormatEnts(m.Entries))
 		go func(m pb.Message) {
 			r.RaftLog.Localstore.Merge(m.Entries)
 			response := pb.Message{
@@ -657,6 +657,7 @@ func stepLeader(r *raft, m pb.Message) {
 				Index: m.Index,
 			}
 			r.send(response)
+			r.RaftLog.Localstore.TruncateEmpty()
 		}(m)
 
 		//plog.Infof("Leader's localStore after merge: %v", m.Entries)
