@@ -23,7 +23,6 @@ import proto "github.com/coreos/etcd/Godeps/_workspace/src/github.com/gogo/proto
 import fmt "fmt"
 import math "math"
 
-
 import io "io"
 
 // Reference imports to suppress errors if they are not otherwise used.

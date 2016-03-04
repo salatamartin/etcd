@@ -1,10 +1,10 @@
 package raftpb
 
 import (
+	"fmt"
 	serverpb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/pkg/pbutil"
 	"time"
-	"fmt"
 )
 
 func (e *Entry) RetrieveMessage() serverpb.Request {
@@ -35,8 +35,8 @@ func (e *Entry) AddTimestamp() {
 
 func (e *Entry) Print() string {
 	msg := e.RetrieveMessage()
-	msgStr := fmt.Sprintf("M:%s K:%s V:%s NQP:%t", msg.Method,msg.Path,msg.Val,msg.NoPutQuorum)
-	return fmt.Sprintf("{T:%d I:%d Ts:%v M:(%s)}", e.Term,e.Index,time.Unix(0,e.Timestamp),msgStr)
+	msgStr := fmt.Sprintf("M:%s K:%s V:%s NQP:%t", msg.Method, msg.Path, msg.Val, msg.NoPutQuorum)
+	return fmt.Sprintf("{T:%d I:%d Ts:%v R:%x M:(%s)}", e.Term, e.Index, time.Unix(0, e.Timestamp), e.Receiver, msgStr)
 }
 
 func NewTimestamp() int64 {
