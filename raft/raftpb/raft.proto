@@ -15,10 +15,12 @@ enum EntryType {
 }
 
 message Entry {
-	optional EntryType  Type  = 1 [(gogoproto.nullable) = false];
-	optional uint64     Term  = 2 [(gogoproto.nullable) = false];
-	optional uint64     Index = 3 [(gogoproto.nullable) = false];
-	optional bytes      Data  = 4;
+	optional EntryType  Type      = 1 [(gogoproto.nullable) = false];
+	optional uint64     Term      = 2 [(gogoproto.nullable) = false];
+	optional uint64     Index     = 3 [(gogoproto.nullable) = false];
+	optional bytes      Data      = 4;
+    optional int64		Timestamp = 5 [(gogoproto.nullable) = false];
+    optional uint64		Receiver  = 6 [(gogoproto.nullable) = false];
 }
 
 message SnapshotMetadata {
@@ -33,22 +35,23 @@ message Snapshot {
 }
 
 enum MessageType {
-	MsgHup             = 0;
-	MsgBeat            = 1;
-	MsgProp            = 2;
-	MsgApp             = 3;
-	MsgAppResp         = 4;
-	MsgVote            = 5;
-	MsgVoteResp        = 6;
-	MsgSnap            = 7;
-	MsgHeartbeat       = 8;
-	MsgHeartbeatResp   = 9;
-	MsgUnreachable     = 10;
-	MsgSnapStatus      = 11;
-	MsgCheckQuorum     = 12;
-	MsgLocalStoreReq   = 13;
-	MsgLocalStoreMerge = 14;
-	MsgLocalStoreResp  = 15;
+	MsgHup                = 0;
+	MsgBeat               = 1;
+	MsgProp               = 2;
+	MsgApp                = 3;
+	MsgAppResp            = 4;
+	MsgVote               = 5;
+	MsgVoteResp           = 6;
+	MsgSnap               = 7;
+	MsgHeartbeat          = 8;
+	MsgHeartbeatResp      = 9;
+	MsgUnreachable        = 10;
+	MsgSnapStatus         = 11;
+	MsgCheckQuorum        = 12;
+	MsgLocalStoreReq      = 13;
+	MsgLocalStoreMerge    = 14;
+	MsgLocalStoreResp     = 15;
+    MsgLocalStoreCommited = 16;
 }
 
 message Message {

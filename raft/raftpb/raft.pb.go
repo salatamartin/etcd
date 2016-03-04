@@ -23,6 +23,7 @@ import proto "github.com/coreos/etcd/Godeps/_workspace/src/github.com/gogo/proto
 import fmt "fmt"
 import math "math"
 
+
 import io "io"
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -66,22 +67,23 @@ func (x *EntryType) UnmarshalJSON(data []byte) error {
 type MessageType int32
 
 const (
-	MsgHup             MessageType = 0
-	MsgBeat            MessageType = 1
-	MsgProp            MessageType = 2
-	MsgApp             MessageType = 3
-	MsgAppResp         MessageType = 4
-	MsgVote            MessageType = 5
-	MsgVoteResp        MessageType = 6
-	MsgSnap            MessageType = 7
-	MsgHeartbeat       MessageType = 8
-	MsgHeartbeatResp   MessageType = 9
-	MsgUnreachable     MessageType = 10
-	MsgSnapStatus      MessageType = 11
-	MsgCheckQuorum     MessageType = 12
-	MsgLocalStoreReq   MessageType = 13
-	MsgLocalStoreMerge MessageType = 14
-	MsgLocalStoreResp  MessageType = 15
+	MsgHup                MessageType = 0
+	MsgBeat               MessageType = 1
+	MsgProp               MessageType = 2
+	MsgApp                MessageType = 3
+	MsgAppResp            MessageType = 4
+	MsgVote               MessageType = 5
+	MsgVoteResp           MessageType = 6
+	MsgSnap               MessageType = 7
+	MsgHeartbeat          MessageType = 8
+	MsgHeartbeatResp      MessageType = 9
+	MsgUnreachable        MessageType = 10
+	MsgSnapStatus         MessageType = 11
+	MsgCheckQuorum        MessageType = 12
+	MsgLocalStoreReq      MessageType = 13
+	MsgLocalStoreMerge    MessageType = 14
+	MsgLocalStoreResp     MessageType = 15
+	MsgLocalStoreCommited MessageType = 16
 )
 
 var MessageType_name = map[int32]string{
@@ -101,24 +103,26 @@ var MessageType_name = map[int32]string{
 	13: "MsgLocalStoreReq",
 	14: "MsgLocalStoreMerge",
 	15: "MsgLocalStoreResp",
+	16: "MsgLocalStoreCommited",
 }
 var MessageType_value = map[string]int32{
-	"MsgHup":             0,
-	"MsgBeat":            1,
-	"MsgProp":            2,
-	"MsgApp":             3,
-	"MsgAppResp":         4,
-	"MsgVote":            5,
-	"MsgVoteResp":        6,
-	"MsgSnap":            7,
-	"MsgHeartbeat":       8,
-	"MsgHeartbeatResp":   9,
-	"MsgUnreachable":     10,
-	"MsgSnapStatus":      11,
-	"MsgCheckQuorum":     12,
-	"MsgLocalStoreReq":   13,
-	"MsgLocalStoreMerge": 14,
-	"MsgLocalStoreResp":  15,
+	"MsgHup":                0,
+	"MsgBeat":               1,
+	"MsgProp":               2,
+	"MsgApp":                3,
+	"MsgAppResp":            4,
+	"MsgVote":               5,
+	"MsgVoteResp":           6,
+	"MsgSnap":               7,
+	"MsgHeartbeat":          8,
+	"MsgHeartbeatResp":      9,
+	"MsgUnreachable":        10,
+	"MsgSnapStatus":         11,
+	"MsgCheckQuorum":        12,
+	"MsgLocalStoreReq":      13,
+	"MsgLocalStoreMerge":    14,
+	"MsgLocalStoreResp":     15,
+	"MsgLocalStoreCommited": 16,
 }
 
 func (x MessageType) Enum() *MessageType {
@@ -179,6 +183,8 @@ type Entry struct {
 	Term             uint64    `protobuf:"varint,2,opt,name=Term" json:"Term"`
 	Index            uint64    `protobuf:"varint,3,opt,name=Index" json:"Index"`
 	Data             []byte    `protobuf:"bytes,4,opt,name=Data" json:"Data,omitempty"`
+	Timestamp        int64     `protobuf:"varint,5,opt,name=Timestamp" json:"Timestamp"`
+	Receiver         uint64    `protobuf:"varint,6,opt,name=Receiver" json:"Receiver"`
 	XXX_unrecognized []byte    `json:"-"`
 }
 
@@ -300,6 +306,12 @@ func (m *Entry) MarshalTo(data []byte) (int, error) {
 		i = encodeVarintRaft(data, i, uint64(len(m.Data)))
 		i += copy(data[i:], m.Data)
 	}
+	data[i] = 0x28
+	i++
+	i = encodeVarintRaft(data, i, uint64(m.Timestamp))
+	data[i] = 0x30
+	i++
+	i = encodeVarintRaft(data, i, uint64(m.Receiver))
 	if m.XXX_unrecognized != nil {
 		i += copy(data[i:], m.XXX_unrecognized)
 	}
@@ -580,6 +592,8 @@ func (m *Entry) Size() (n int) {
 		l = len(m.Data)
 		n += 1 + l + sovRaft(uint64(l))
 	}
+	n += 1 + sovRaft(uint64(m.Timestamp))
+	n += 1 + sovRaft(uint64(m.Receiver))
 	if m.XXX_unrecognized != nil {
 		n += len(m.XXX_unrecognized)
 	}
@@ -812,6 +826,44 @@ func (m *Entry) Unmarshal(data []byte) error {
 				m.Data = []byte{}
 			}
 			iNdEx = postIndex
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Timestamp", wireType)
+			}
+			m.Timestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRaft
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := data[iNdEx]
+				iNdEx++
+				m.Timestamp |= (int64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Receiver", wireType)
+			}
+			m.Receiver = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRaft
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := data[iNdEx]
+				iNdEx++
+				m.Receiver |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipRaft(data[iNdEx:])

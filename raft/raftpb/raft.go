@@ -3,6 +3,8 @@ package raftpb
 import (
 	serverpb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/pkg/pbutil"
+	"time"
+	"fmt"
 )
 
 func (e *Entry) RetrieveMessage() serverpb.Request {
@@ -27,3 +29,16 @@ func (e *Entry) CompareMessage(e2 Entry) bool {
 	return req1.Method == req2.Method && req1.Path == req2.Path
 }
 
+func (e *Entry) AddTimestamp() {
+	e.Timestamp = time.Now().UnixNano()
+}
+
+func (e *Entry) Print() string {
+	msg := e.RetrieveMessage()
+	msgStr := fmt.Sprintf("M:%s K:%s V:%s NQP:%t", msg.Method,msg.Path,msg.Val,msg.NoPutQuorum)
+	return fmt.Sprintf("{T:%d I:%d Ts:%v M:(%s)}", e.Term,e.Index,time.Unix(0,e.Timestamp),msgStr)
+}
+
+func NewTimestamp() int64 {
+	return time.Now().UnixNano()
+}
