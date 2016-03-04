@@ -505,7 +505,7 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 		)
 	}
 
-	var rec, sort, wait, dir, quorum, noputquorum, stream, blocking bool
+	var rec, sort, wait, dir, quorum, noquorumput, stream, blocking bool
 	if rec, err = getBool(r.Form, "recursive"); err != nil {
 		return emptyReq, etcdErr.NewRequestError(
 			etcdErr.EcodeInvalidField,
@@ -541,10 +541,10 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 		quorum = true
 	}
 
-	if noputquorum, err = getBool(r.Form, "noputquorum"); err != nil {
+	if noquorumput, err = getBool(r.Form, "noquorumput"); err != nil {
 		return emptyReq, etcdErr.NewRequestError(
 			etcdErr.EcodeInvalidField,
-			`invalid value for "noputquorum"`,
+			`invalid value for "noquorumput"`,
 		)
 	}
 
@@ -619,7 +619,7 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 		Quorum:      quorum,
 		Stream:      stream,
 		Blocking:    blocking,
-		NoPutQuorum: noputquorum,
+		NoQuorumPut: noquorumput,
 	}
 
 	if pe != nil {

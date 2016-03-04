@@ -35,7 +35,7 @@ func (e *Entry) AddTimestamp() {
 
 func (e *Entry) Print() string {
 	msg := e.RetrieveMessage()
-	msgStr := fmt.Sprintf("M:%s K:%s V:%s NQP:%t", msg.Method, msg.Path, msg.Val, msg.NoPutQuorum)
+	msgStr := fmt.Sprintf("M:%s K:%s V:%s NQP:%t", msg.Method, msg.Path, msg.Val, msg.NoQuorumPut)
 	return fmt.Sprintf("{T:%d I:%d Ts:%v R:%x M:(%s)}", e.Term, e.Index, time.Unix(0, e.Timestamp), e.Receiver, msgStr)
 }
 
