@@ -1,8 +1,8 @@
 package raft
 
 import (
-	"testing"
 	"github.com/coreos/etcd/raft/raftpb"
+	"testing"
 )
 
 func TestTruncate(t *testing.T) {
@@ -11,19 +11,19 @@ func TestTruncate(t *testing.T) {
 	}
 
 	lStore1 := localStore{
-		ents: []raftpb.Entry{defEntry, defEntry, raftpb.Entry{Data:nil}},
+		ents: []raftpb.Entry{defEntry, defEntry, raftpb.Entry{Data: nil}},
 	}
 
 	lStore2 := localStore{
-		ents: []raftpb.Entry{raftpb.Entry{Data:nil}, defEntry, defEntry},
+		ents: []raftpb.Entry{raftpb.Entry{Data: nil}, defEntry, defEntry},
 	}
 
 	lStore3 := localStore{
-		ents: []raftpb.Entry{defEntry, raftpb.Entry{Data:nil}, defEntry},
+		ents: []raftpb.Entry{defEntry, raftpb.Entry{Data: nil}, defEntry},
 	}
 
 	lStore4 := localStore{
-		ents: []raftpb.Entry{raftpb.Entry{Data:nil}, defEntry, raftpb.Entry{Data:nil}, defEntry, raftpb.Entry{Data:nil}},
+		ents: []raftpb.Entry{raftpb.Entry{Data: nil}, defEntry, raftpb.Entry{Data: nil}, defEntry, raftpb.Entry{Data: nil}},
 	}
 
 	if lStore1.TruncateEmpty(); len(lStore1.ents) != 2 {
