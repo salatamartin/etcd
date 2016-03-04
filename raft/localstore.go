@@ -38,10 +38,15 @@ type LocalStore interface {
 	//removes all entries with nil Data attribute
 	//should only be called on leader, when not waiting for MsgLocalStoreResp
 	TruncateEmpty()
+
+	RemoveFirst(count uint64)
+
+	RemoveFromWaiting(timestamp int64) *pb.Entry
 }
 
 type localStore struct {
-	mu               sync.Mutex
+	entsMutex        sync.Mutex
+	waitingMutex     sync.Mutex
 	ents             []pb.Entry
 	waitingForCommit []pb.Entry
 	logger           Logger
@@ -55,13 +60,14 @@ func NewLocalStore(log Logger) *localStore {
 		ents:             []pb.Entry{},
 		waitingForCommit: []pb.Entry{},
 		logger:           log,
-		mu:               sync.Mutex{},
+		entsMutex:        sync.Mutex{},
+		waitingMutex:     sync.Mutex{},
 	}
 }
 
 func (ls *localStore) MaybeAdd(ent pb.Entry) (bool, error) {
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
+	ls.entsMutex.Lock()
+	defer ls.entsMutex.Unlock()
 	for index, entry := range ls.ents {
 		if entry.CompareMessage(ent) {
 			//TODO: choose better (based on index and term)
@@ -86,8 +92,8 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (bool, error) {
 }
 
 func (ls *localStore) Clear() {
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
+	ls.entsMutex.Lock()
+	defer ls.entsMutex.Unlock()
 	ls.ents = []pb.Entry{}
 }
 
@@ -125,8 +131,8 @@ func (ls *localStore) TrimWithLastSent() {
 }
 
 func (ls *localStore) TruncateEmpty() {
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
+	ls.entsMutex.Lock()
+	defer ls.entsMutex.Unlock()
 	for index := len(ls.ents) - 1; index >= 0; index-- {
 		if ls.ents[index].Data == nil || len(ls.ents[index].Data) == 0 {
 			if index == len(ls.ents)-1 {
@@ -137,6 +143,28 @@ func (ls *localStore) TruncateEmpty() {
 		}
 
 	}
+}
+
+func (ls *localStore) RemoveFirst(count uint64) {
+	ls.entsMutex.Lock()
+	defer ls.entsMutex.Unlock()
+	if len(ls.ents) == 0 {
+		return
+	}
+	ls.ents = ls.ents[count:]
+}
+
+func (ls *localStore) RemoveFromWaiting(timestamp int64) *pb.Entry {
+	ls.waitingMutex.Lock()
+	defer ls.waitingMutex.Unlock()
+
+	for index, entry := range ls.waitingForCommit {
+		if entry.Timestamp == timestamp {
+			ls.ents = append(ls.waitingForCommit[:index], ls.waitingForCommit[index+1:]...)
+			return &entry
+		}
+	}
+	return nil
 }
 
 func FormatEnts(ents []pb.Entry) string {
