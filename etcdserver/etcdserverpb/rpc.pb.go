@@ -12,8 +12,7 @@ import storagepb "github.com/coreos/etcd/storage/storagepb"
 
 import (
 	context "github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
-    grpc "github.com/coreos/etcd/Godeps/_workspace/src/google.golang.org/grpc"
-
+	grpc "github.com/coreos/etcd/Godeps/_workspace/src/google.golang.org/grpc"
 )
 
 import io "io"

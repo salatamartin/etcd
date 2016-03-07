@@ -231,6 +231,7 @@ func NewServer(cfg *ServerConfig) (*EtcdServer, error) {
 	}
 
 	haveWAL := wal.Exist(cfg.WALDir())
+	haveLocalWAL := wal.Exist(cfg.LocalWALDir())
 	ss := snap.New(cfg.SnapDir())
 
 	prt, err := rafthttp.NewRoundTripper(cfg.PeerTLSInfo, cfg.peerDialTimeout())
@@ -303,6 +304,10 @@ func NewServer(cfg *ServerConfig) (*EtcdServer, error) {
 
 		if err := fileutil.IsDirWriteable(cfg.WALDir()); err != nil {
 			return nil, fmt.Errorf("cannot write to WAL directory: %v", err)
+		}
+
+		if err := fileutil.IsDirWriteable(cfg.LocalWALDir()); err != nil && haveLocalWAL {
+			return nil, fmt.Errorf("cannot write to LocalWAL directory: %v", err)
 		}
 
 		if cfg.ShouldDiscover() {
@@ -601,7 +606,7 @@ func (s *EtcdServer) applyAll(ep *etcdProgress, apply *apply) {
 }
 
 func (s *EtcdServer) applySnapshot(ep *etcdProgress, apply *apply) {
-	if raft.IsEmptySnap(apply.snapshot) {
+	if raftpb.IsEmptySnap(apply.snapshot) {
 		return
 	}
 
@@ -1377,7 +1382,7 @@ func (s *EtcdServer) monitorLocalStore() {
 			message.Blocking = true
 			message.Quorum = true
 			_, err := s.Do(ctx, message)
-			if err != nil{
+			if err != nil {
 				continue
 			}
 			(*lStore).RemoveFirst(1)

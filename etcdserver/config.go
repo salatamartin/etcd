@@ -36,15 +36,16 @@ type ServerConfig struct {
 	DataDir        string
 	// DedicatedWALDir config will make the etcd to write the WAL to the WALDir
 	// rather than the dataDir/member/wal.
-	DedicatedWALDir     string
-	SnapCount           uint64
-	MaxSnapFiles        uint
-	MaxWALFiles         uint
-	InitialPeerURLsMap  types.URLsMap
-	InitialClusterToken string
-	NewCluster          bool
-	ForceNewCluster     bool
-	PeerTLSInfo         transport.TLSInfo
+	DedicatedWALDir      string
+	DedicatedLocalWALDir string
+	SnapCount            uint64
+	MaxSnapFiles         uint
+	MaxWALFiles          uint
+	InitialPeerURLsMap   types.URLsMap
+	InitialClusterToken  string
+	NewCluster           bool
+	ForceNewCluster      bool
+	PeerTLSInfo          transport.TLSInfo
 
 	TickMs           uint
 	ElectionTicks    int
@@ -122,6 +123,13 @@ func (c *ServerConfig) WALDir() string {
 	return path.Join(c.MemberDir(), "wal")
 }
 
+func (c *ServerConfig) LocalWALDir() string {
+	if c.DedicatedWALDir != "" {
+		return c.DedicatedWALDir
+	}
+	return path.Join(c.MemberDir(), "localWal")
+}
+
 func (c *ServerConfig) SnapDir() string { return path.Join(c.MemberDir(), "snap") }
 
 func (c *ServerConfig) ShouldDiscover() bool { return c.DiscoveryURL != "" }
@@ -152,6 +160,9 @@ func (c *ServerConfig) print(initial bool) {
 	plog.Infof("member dir = %s", c.MemberDir())
 	if c.DedicatedWALDir != "" {
 		plog.Infof("dedicated WAL dir = %s", c.DedicatedWALDir)
+	}
+	if c.DedicatedLocalWALDir != "" {
+		plog.Infof("dedicated local WAL dir = %s", c.DedicatedLocalWALDir)
 	}
 	plog.Infof("heartbeat = %dms", c.TickMs)
 	plog.Infof("election = %dms", c.ElectionTicks*int(c.TickMs))

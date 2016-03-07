@@ -42,3 +42,17 @@ func (e *Entry) Print() string {
 func NewTimestamp() int64 {
 	return time.Now().UnixNano()
 }
+
+func IsHardStateEqual(a, b HardState) bool {
+	return a.Term == b.Term && a.Vote == b.Vote && a.Commit == b.Commit
+}
+
+// IsEmptyHardState returns true if the given HardState is empty.
+func IsEmptyHardState(st HardState) bool {
+	return IsHardStateEqual(st, HardState{})
+}
+
+// IsEmptySnap returns true if the given Snapshot is empty.
+func IsEmptySnap(sp Snapshot) bool {
+	return sp.Metadata.Index == 0
+}

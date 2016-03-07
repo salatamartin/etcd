@@ -27,7 +27,7 @@ import (
 
 	"github.com/coreos/etcd/pkg/fileutil"
 	"github.com/coreos/etcd/pkg/pbutil"
-	"github.com/coreos/etcd/raft"
+	//"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/wal/walpb"
 
@@ -238,9 +238,11 @@ func (w *WAL) ReadAll() (metadata []byte, state raftpb.HardState, ents []raftpb.
 		switch rec.Type {
 		case entryType:
 			e := mustUnmarshalEntry(rec.Data)
+			plog.Infof("wal.ReadAll(%s): len(ents)=%d, e.Index=%d, w.start.Index=%d", w.dir, len(ents), e.Index, w.start.Index)
 			if e.Index > w.start.Index {
 				ents = append(ents[:e.Index-w.start.Index-1], e)
 			}
+
 			w.enti = e.Index
 		case stateType:
 			state = mustUnmarshalState(rec.Data)
@@ -484,7 +486,7 @@ func (w *WAL) saveEntry(e *raftpb.Entry) error {
 }
 
 func (w *WAL) saveState(s *raftpb.HardState) error {
-	if raft.IsEmptyHardState(*s) {
+	if raftpb.IsEmptyHardState(*s) {
 		return nil
 	}
 	w.state = *s
@@ -498,7 +500,7 @@ func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 	defer w.mu.Unlock()
 
 	// short cut, do not call sync
-	if raft.IsEmptyHardState(st) && len(ents) == 0 {
+	if raftpb.IsEmptyHardState(st) && len(ents) == 0 {
 		return nil
 	}
 
@@ -543,3 +545,5 @@ func (w *WAL) SaveSnapshot(e walpb.Snapshot) error {
 func (w *WAL) saveCrc(prevCrc uint32) error {
 	return w.encoder.encode(&walpb.Record{Type: crcType, Crc: prevCrc})
 }
+
+func (w *WAL) GetDir() string { return w.dir }

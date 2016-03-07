@@ -19,6 +19,7 @@ import (
 	"log"
 
 	pb "github.com/coreos/etcd/raft/raftpb"
+	"github.com/coreos/etcd/wal"
 )
 
 type raftLog struct {
@@ -45,14 +46,14 @@ type raftLog struct {
 
 // newLog returns log using the given storage. It recovers the log to the state
 // that it just commits and applies the latest snapshot.
-func newLog(storage Storage, logger Logger) *raftLog {
+func newLog(storage Storage, logger Logger, lw *wal.WAL, lwSize uint64) *raftLog {
 	if storage == nil {
 		log.Panic("storage must not be nil")
 	}
 	log := &raftLog{
 		storage:    storage,
 		logger:     logger,
-		Localstore: NewLocalStore(logger),
+		Localstore: NewLocalStore(logger, lw, lwSize),
 	}
 	firstIndex, err := storage.FirstIndex()
 	if err != nil {

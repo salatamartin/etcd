@@ -30,6 +30,7 @@ import (
 	//"github.com/coreos/etcd/pkg/pbutil"
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	pb "github.com/coreos/etcd/raft/raftpb"
+	"github.com/coreos/etcd/wal"
 	"time"
 )
 
@@ -131,6 +132,11 @@ type Config struct {
 	// can host multiple raft group, each raft group can have its
 	// own logger
 	Logger Logger
+
+	// used in raftLog.LocalStore as persistent storage
+	LocalWal *wal.WAL
+
+	MaybeEnts []pb.Entry
 }
 
 func (c *Config) validate() error {
@@ -211,7 +217,12 @@ func newRaft(c *Config) *raft {
 	if err := c.validate(); err != nil {
 		panic(err.Error())
 	}
-	raftlog := newLog(c.Storage, c.Logger)
+	raftlog := newLog(c.Storage, c.Logger, c.LocalWal, uint64(len(c.MaybeEnts)))
+
+	if c.MaybeEnts != nil && len(c.MaybeEnts) > 0 {
+		raftlog.Localstore.Merge(c.MaybeEnts)
+	}
+
 	hs, cs, err := c.Storage.InitialState()
 	if err != nil {
 		panic(err) // TODO(bdarnell)
@@ -242,7 +253,7 @@ func newRaft(c *Config) *raft {
 	for _, p := range peers {
 		r.prs[p] = &Progress{Next: 1, ins: newInflights(r.maxInflight)}
 	}
-	if !isHardStateEqual(hs, emptyState) {
+	if !pb.IsHardStateEqual(hs, emptyState) {
 		r.loadState(hs)
 	}
 	if c.Applied > 0 {
@@ -322,7 +333,7 @@ func (r *raft) sendAppend(to uint64) {
 			}
 			panic(err) // TODO(bdarnell)
 		}
-		if IsEmptySnap(snapshot) {
+		if pb.IsEmptySnap(snapshot) {
 			panic("need non-empty snapshot")
 		}
 		m.Snapshot = snapshot
@@ -750,7 +761,7 @@ func handleMsgLocalStoreCommited(r *raft, m pb.Message) {
 	e := r.RaftLog.Localstore.RemoveFromWaiting(int64(m.Commit))
 	plog.Infof("Received MsgLocalStoreCommited message, with timestamp of committed message %v", time.Unix(0, int64(m.Commit)))
 	if e != nil {
-		plog.Infof("Entry %s successfully commited with quorum, removing from peristent storage", e.Print())
+		plog.Infof("Entry %s successfully commited with quorum, removed from peristent storage", e.Print())
 	} else {
 		plog.Infof("Entry with given timestamp not found!")
 	}

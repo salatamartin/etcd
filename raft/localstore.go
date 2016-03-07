@@ -2,12 +2,17 @@ package raft
 
 import (
 	"bytes"
+	"io/ioutil"
+	"os"
 	"sync"
 	"time"
 
 	//serverpb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	pb "github.com/coreos/etcd/raft/raftpb"
+	"github.com/coreos/etcd/wal"
+	//"github.com/coreos/etcd/wal/walpb"
+	"path"
 )
 
 const (
@@ -47,21 +52,27 @@ type LocalStore interface {
 type localStore struct {
 	entsMutex        sync.Mutex
 	waitingMutex     sync.Mutex
+	walMutex         sync.Mutex
 	ents             []pb.Entry
 	waitingForCommit []pb.Entry
+	wal              *wal.WAL
 	logger           Logger
 	lastIndexSent    uint64
+	lastInWal        uint64
 	context          context.Context
 	cancel           context.CancelFunc
 }
 
-func NewLocalStore(log Logger) *localStore {
+func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) *localStore {
 	return &localStore{
 		ents:             []pb.Entry{},
 		waitingForCommit: []pb.Entry{},
+		wal:              w,
 		logger:           log,
 		entsMutex:        sync.Mutex{},
 		waitingMutex:     sync.Mutex{},
+		walMutex:         sync.Mutex{},
+		lastInWal:        wSize,
 	}
 }
 
@@ -88,6 +99,11 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (bool, error) {
 	}
 	ls.ents = append(ls.ents, ent)
 	ls.logger.Infof("Local log after MaybeAdd: %s", FormatEnts(ls.ents))
+	ls.walMutex.Lock()
+	ls.lastInWal++
+	ent.Index = ls.lastInWal
+	ls.wal.Save(pb.HardState{}, []pb.Entry{ent})
+	ls.walMutex.Unlock()
 	return true, nil
 }
 
@@ -160,7 +176,35 @@ func (ls *localStore) RemoveFromWaiting(timestamp int64) *pb.Entry {
 
 	for index, entry := range ls.waitingForCommit {
 		if entry.Timestamp == timestamp {
-			ls.ents = append(ls.waitingForCommit[:index], ls.waitingForCommit[index+1:]...)
+			ls.waitingForCommit = append(ls.waitingForCommit[:index], ls.waitingForCommit[index+1:]...)
+			// if all logs are empty, clear persistent storage (not needed anymore)
+			plog.Infof("Number of NQPUTs: not yet received by leader: %d, not yet committed: %d", len(ls.ents), len(ls.waitingForCommit))
+			if len(ls.ents) == 0 && len(ls.waitingForCommit) == 0 {
+				go func() {
+					ls.walMutex.Lock()
+					defer ls.walMutex.Unlock()
+					ls.wal.Close()
+					files, err := ioutil.ReadDir(ls.wal.GetDir())
+					if err != nil {
+						plog.Infof("Error at ioutil: %v", err)
+						return
+					}
+					for _, file := range files {
+						if error := os.Remove(path.Join(ls.wal.GetDir(), file.Name())); error != nil {
+							plog.Infof("Could not remove file %s, error:%v", file.Name(), error)
+						}
+					}
+					//var walsnap walpb.Snapshot
+					newWal, error := wal.Create(ls.wal.GetDir(), nil)
+					if error != nil {
+						plog.Infof("Could not open new wal at %s: %v", ls.wal.GetDir(), error)
+						return
+					}
+					ls.wal = newWal
+					ls.lastInWal = 0
+					plog.Infof("SUccessfully removed all entries from persistent storage")
+				}()
+			}
 			return &entry
 		}
 	}

@@ -79,6 +79,7 @@ type config struct {
 	corsInfo       *cors.CORSInfo
 	dir            string
 	walDir         string
+	localWalDir    string
 	lpurls, lcurls []url.URL
 	maxSnapFiles   uint
 	maxWalFiles    uint
@@ -157,6 +158,7 @@ func NewConfig() *config {
 	fs.Var(cfg.corsInfo, "cors", "Comma-separated white list of origins for CORS (cross-origin resource sharing).")
 	fs.StringVar(&cfg.dir, "data-dir", "", "Path to the data directory.")
 	fs.StringVar(&cfg.walDir, "wal-dir", "", "Path to the dedicated wal directory.")
+	fs.StringVar(&cfg.localWalDir, "local-wal-dir", "", "Path to the dedicated local wal directory.")
 	fs.Var(flags.NewURLsValue("http://localhost:2380,http://localhost:7001"), "listen-peer-urls", "List of URLs to listen on for peer traffic.")
 	fs.Var(flags.NewURLsValue("http://localhost:2379,http://localhost:4001"), "listen-client-urls", "List of URLs to listen on for client traffic.")
 	fs.UintVar(&cfg.maxSnapFiles, "max-snapshots", defaultMaxSnapshots, "Maximum number of snapshot files to retain (0 is unlimited).")

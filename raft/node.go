@@ -79,6 +79,7 @@ type Ready struct {
 	Messages []pb.Message
 }
 
+/*
 func isHardStateEqual(a, b pb.HardState) bool {
 	return a.Term == b.Term && a.Vote == b.Vote && a.Commit == b.Commit
 }
@@ -92,10 +93,10 @@ func IsEmptyHardState(st pb.HardState) bool {
 func IsEmptySnap(sp pb.Snapshot) bool {
 	return sp.Metadata.Index == 0
 }
-
+*/
 func (rd Ready) containsUpdates() bool {
-	return rd.SoftState != nil || !IsEmptyHardState(rd.HardState) ||
-		!IsEmptySnap(rd.Snapshot) || len(rd.Entries) > 0 ||
+	return rd.SoftState != nil || !pb.IsEmptyHardState(rd.HardState) ||
+		!pb.IsEmptySnap(rd.Snapshot) || len(rd.Entries) > 0 ||
 		len(rd.CommittedEntries) > 0 || len(rd.Messages) > 0
 }
 
@@ -333,10 +334,10 @@ func (n *node) run(r *raft) {
 				prevLastUnstablet = rd.Entries[len(rd.Entries)-1].Term
 				havePrevLastUnstablei = true
 			}
-			if !IsEmptyHardState(rd.HardState) {
+			if !pb.IsEmptyHardState(rd.HardState) {
 				prevHardSt = rd.HardState
 			}
-			if !IsEmptySnap(rd.Snapshot) {
+			if !pb.IsEmptySnap(rd.Snapshot) {
 				prevSnapi = rd.Snapshot.Metadata.Index
 			}
 			r.msgs = nil
@@ -469,7 +470,7 @@ func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
 	if softSt := r.softState(); !softSt.equal(prevSoftSt) {
 		rd.SoftState = softSt
 	}
-	if hardSt := r.hardState(); !isHardStateEqual(hardSt, prevHardSt) {
+	if hardSt := r.hardState(); !pb.IsHardStateEqual(hardSt, prevHardSt) {
 		rd.HardState = hardSt
 	}
 	if r.RaftLog.unstable.snapshot != nil {

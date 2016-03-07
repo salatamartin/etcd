@@ -24,7 +24,6 @@ import (
 	"github.com/coreos/etcd/pkg/pbutil"
 	"github.com/coreos/etcd/pkg/testutil"
 	"github.com/coreos/etcd/pkg/types"
-	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/snap"
 	"github.com/coreos/etcd/version"
@@ -159,7 +158,7 @@ func (p *storageRecorder) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 }
 
 func (p *storageRecorder) SaveSnap(st raftpb.Snapshot) error {
-	if !raft.IsEmptySnap(st) {
+	if !raftpb.IsEmptySnap(st) {
 		p.Record(testutil.Action{Name: "SaveSnap"})
 	}
 	return nil
