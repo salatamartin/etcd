@@ -82,7 +82,7 @@ type Request struct {
 	Time             int64  `protobuf:"varint,15,opt,name=Time" json:"Time"`
 	Stream           bool   `protobuf:"varint,16,opt,name=Stream" json:"Stream"`
 	Blocking         bool   `protobuf:"varint,17,opt,name=Blocking" json:"Blocking"`
-	NoQuorumPut      bool   `protobuf:"varint,18,opt,name=NoQuorumPut" json:"NoQuorumPut"`
+	NoQuorumRequest  bool   `protobuf:"varint,18,opt,name=NoQuorumRequest" json:"NoQuorumRequest"`
 	XXX_unrecognized []byte `json:"-"`
 }
 
@@ -224,7 +224,7 @@ func (m *Request) MarshalTo(data []byte) (int, error) {
 	i++
 	data[i] = 0x1
 	i++
-	if m.NoQuorumPut {
+	if m.NoQuorumRequest {
 		data[i] = 1
 	} else {
 		data[i] = 0
@@ -750,7 +750,7 @@ func (m *Request) Unmarshal(data []byte) error {
 			m.Blocking = bool(v != 0)
 		case 18:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field NoQuorumPut", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field NoQuorumRequest", wireType)
 			}
 			var v int
 			for shift := uint(0); ; shift += 7 {
@@ -767,7 +767,7 @@ func (m *Request) Unmarshal(data []byte) error {
 					break
 				}
 			}
-			m.NoQuorumPut = bool(v != 0)
+			m.NoQuorumRequest = bool(v != 0)
 		default:
 			iNdEx = preIndex
 			skippy, err := skipEtcdserver(data[iNdEx:])

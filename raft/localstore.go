@@ -12,15 +12,19 @@ import (
 	pb "github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/wal"
 	//"github.com/coreos/etcd/wal/walpb"
+	//"github.com/coreos/etcd/etcdserver/etcdserverpb"
+	"github.com/coreos/etcd/store"
 	"path"
 )
 
 const (
 	pushLocalStoreDeadline time.Duration = 5 * time.Second
+	ClusterPrefix                        = "/0"
+	KeysPrefix                           = "/1"
 )
 
 type LocalStore interface {
-	MaybeAdd(ent pb.Entry) (bool, error)
+	MaybeAdd(ent pb.Entry) (*store.Event, error)
 
 	Clear()
 
@@ -47,6 +51,8 @@ type LocalStore interface {
 	RemoveFirst(count uint64)
 
 	RemoveFromWaiting(timestamp int64) *pb.Entry
+
+	KVStore() store.Store
 }
 
 type localStore struct {
@@ -61,6 +67,7 @@ type localStore struct {
 	lastInWal        uint64
 	context          context.Context
 	cancel           context.CancelFunc
+	kvStore          store.Store
 }
 
 func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) *localStore {
@@ -73,10 +80,11 @@ func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) *localStore {
 		waitingMutex:     sync.Mutex{},
 		walMutex:         sync.Mutex{},
 		lastInWal:        wSize,
+		kvStore:          store.New(ClusterPrefix, KeysPrefix),
 	}
 }
 
-func (ls *localStore) MaybeAdd(ent pb.Entry) (bool, error) {
+func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 	ls.entsMutex.Lock()
 	defer ls.entsMutex.Unlock()
 	for index, entry := range ls.ents {
@@ -84,27 +92,35 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (bool, error) {
 			//TODO: choose better (based on index and term)
 			if entry.Term > ent.Term {
 				plog.Infof("Conflict found, localstore already has entry %s, but with higher term", ent.Print())
-				return false, nil
+				return nil, nil
 			} else if entry.Term == ent.Term {
 				if entry.Timestamp >= ent.Timestamp {
 					plog.Infof("Conflict found, localstore already has entry %s, but with higher timestamp", ent.Print())
-					return false, nil
+					return nil, nil
 				}
 			}
 			ls.ents[index].Data = nil
 			break
-			//ls.ents = append(ls.ents, ent)
-			//return true, nil
 		}
 	}
 	ls.ents = append(ls.ents, ent)
 	ls.logger.Infof("Local log after MaybeAdd: %s", FormatEnts(ls.ents))
+	//we have to wait until log is persisted on disk before continuing
 	ls.walMutex.Lock()
 	ls.lastInWal++
 	ent.Index = ls.lastInWal
 	ls.wal.Save(pb.HardState{}, []pb.Entry{ent})
 	ls.walMutex.Unlock()
-	return true, nil
+
+	//write to KVstore to get the Event
+	r := ent.RetrieveMessage()
+	event, err := ls.kvStore.Set(r.Path, r.Dir, r.Val, store.Permanent)
+	if err != nil {
+		plog.Infof("Could not write entry to local KV store")
+		event = nil
+	}
+	event.Action = "noQuorumSet"
+	return event, nil
 }
 
 func (ls *localStore) Clear() {
@@ -205,6 +221,15 @@ func (ls *localStore) RemoveFromWaiting(timestamp int64) *pb.Entry {
 					plog.Infof("SUccessfully removed all entries from persistent storage")
 				}()
 			}
+
+			//remove entry from KV store
+			go func(entry pb.Entry) {
+				r := entry.RetrieveMessage()
+				//TODO: check other request types
+				if r.Method == "PUT" {
+					ls.kvStore.Delete(r.Path, r.Dir, r.Recursive)
+				}
+			}(entry)
 			return &entry
 		}
 	}
@@ -218,3 +243,5 @@ func FormatEnts(ents []pb.Entry) string {
 	}
 	return buffer.String()
 }
+
+func (ls *localStore) KVStore() store.Store { return ls.kvStore }

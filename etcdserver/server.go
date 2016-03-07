@@ -738,7 +738,7 @@ func (s *EtcdServer) StopNotify() <-chan struct{} { return s.done }
 // an error.
 func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 	r.ID = s.reqIDGen.Next()
-	if r.Method == "GET" && r.Quorum {
+	if r.Method == "GET" && r.Quorum || r.NoQuorumRequest {
 		r.Method = "QGET"
 	}
 	switch r.Method {
@@ -748,7 +748,8 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 			return Response{}, err
 		}
 
-		if r.Method == "PUT" && r.NoQuorumPut {
+		//save to persistent local storage, which will eventually propagate cahnges to leader
+		if r.Method == "PUT" && r.NoQuorumRequest {
 			entry := raftpb.Entry{
 				Term:      s.Term(),
 				Index:     s.Index(),
@@ -757,16 +758,16 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 				Data:      data,
 			}
 			plog.Infof("NQPUT request received: %v", r)
-			ok, err := s.r.Raft().RaftLog.Localstore.MaybeAdd(entry)
+			event, err := s.r.Raft().RaftLog.Localstore.MaybeAdd(entry)
 			if err != nil {
 				plog.Infof("Error during MaybeAdd, error: %s", err.Error())
 				return Response{}, err
 			}
 
-			if ok {
-				return Response{NoQuorumResponse: "Request has been saved to local log, will be processed ASAP"}, nil
+			if event != nil {
+				return Response{Event: event}, nil
 			} else {
-				return Response{NoQuorumResponse: "Request has not been saved, newer is already saved"}, nil
+				return Response{NoQuorumResponse: "Request has not been saved, newer entry is already present"}, nil
 			}
 		}
 
@@ -801,11 +802,17 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 			}
 			return Response{Watcher: wc}, nil
 		default:
-			ev, err := s.store.Get(r.Path, r.Recursive, r.Sorted)
-			if err != nil {
-				return Response{}, err
+			//check local store for entry first, lEventErr holds info if "keynotfound"
+			lEvent, lEventErr := s.r.Raft().RaftLog.Localstore.KVStore().Get(r.Path, r.Recursive, r.Sorted)
+			if lEventErr != nil {
+				ev, err := s.store.Get(r.Path, r.Recursive, r.Sorted)
+				if err != nil {
+					return Response{}, err
+				}
+				return Response{Event: ev}, nil
 			}
-			return Response{Event: ev}, nil
+			return Response{Event: lEvent}, nil
+
 		}
 	case "HEAD":
 		ev, err := s.store.Get(r.Path, r.Recursive, r.Sorted)
@@ -1378,7 +1385,7 @@ func (s *EtcdServer) monitorLocalStore() {
 		for len((*lStore).Entries()) != 0 {
 			toCommit := (*lStore).Entries()[0]
 			message := toCommit.RetrieveMessage()
-			message.NoQuorumPut = false
+			message.NoQuorumRequest = false
 			message.Blocking = true
 			message.Quorum = true
 			_, err := s.Do(ctx, message)

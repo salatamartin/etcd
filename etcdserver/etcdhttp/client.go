@@ -154,16 +154,19 @@ func (h *keysHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if rr.Blocking {
-		plog.Infof("Received request with blocking == true ##############################")
-	}
-
 	if rr.PrevValue != "" && !rr.Blocking {
 		swapError := errors.New("Request with defined required previous value has to also be blocking")
 		writeKeyError(w, swapError)
 		reportRequestFailed(rr, swapError)
 		return
 	}
+
+	if rr.Method == "PUT" && !rr.Quorum && !rr.NoQuorumRequest {
+		nqputError := errors.New("PUT request's 'Quorum' field has to be true. For no-quorum PUT set 'NoQuorumRequest' to true")
+		writeKeyError(w, nqputError)
+		reportRequestFailed(rr, nqputError)
+	}
+
 	var ctx context.Context
 	var cancel context.CancelFunc
 
@@ -505,7 +508,7 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 		)
 	}
 
-	var rec, sort, wait, dir, quorum, noquorumput, stream, blocking bool
+	var rec, sort, wait, dir, quorum, noquorumreq, stream, blocking bool
 	if rec, err = getBool(r.Form, "recursive"); err != nil {
 		return emptyReq, etcdErr.NewRequestError(
 			etcdErr.EcodeInvalidField,
@@ -541,10 +544,10 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 		quorum = true
 	}
 
-	if noquorumput, err = getBool(r.Form, "noquorumput"); err != nil {
+	if noquorumreq, err = getBool(r.Form, "noquorumrequest"); err != nil {
 		return emptyReq, etcdErr.NewRequestError(
 			etcdErr.EcodeInvalidField,
-			`invalid value for "noquorumput"`,
+			`invalid value for "noquorumrequest"`,
 		)
 	}
 
@@ -605,21 +608,21 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 	}
 
 	rr := etcdserverpb.Request{
-		Method:      r.Method,
-		Path:        p,
-		Val:         r.FormValue("value"),
-		Dir:         dir,
-		PrevValue:   pV,
-		PrevIndex:   pIdx,
-		PrevExist:   pe,
-		Wait:        wait,
-		Since:       wIdx,
-		Recursive:   rec,
-		Sorted:      sort,
-		Quorum:      quorum,
-		Stream:      stream,
-		Blocking:    blocking,
-		NoQuorumPut: noquorumput,
+		Method:          r.Method,
+		Path:            p,
+		Val:             r.FormValue("value"),
+		Dir:             dir,
+		PrevValue:       pV,
+		PrevIndex:       pIdx,
+		PrevExist:       pe,
+		Wait:            wait,
+		Since:           wIdx,
+		Recursive:       rec,
+		Sorted:          sort,
+		Quorum:          quorum,
+		Stream:          stream,
+		Blocking:        blocking,
+		NoQuorumRequest: noquorumreq,
 	}
 
 	if pe != nil {
