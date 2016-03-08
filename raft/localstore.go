@@ -46,12 +46,13 @@ type LocalStore interface {
 	//removes first LastSent() entries, resets LastSent to 0
 	TrimWithLastSent()
 
-	//removes all entries with nil Data attribute
+	//removes all entries with empty Data attribute
 	//should only be called on leader, when not waiting for MsgLocalStoreResp
 	TruncateEmpty()
 
 	RemoveFirst(count uint64)
 
+	//removes entry with defined timestamp
 	RemoveFromWaiting(timestamp int64) *pb.Entry
 
 	KVStore() store.Store
@@ -122,7 +123,7 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 		plog.Infof("Could not write entry to local KV store")
 		return nil, err
 	}
-	event.Action = "noQuorumSet"
+	event.Action = fmt.Sprintf("noQuorum%s", event.Action)
 	return event, nil
 }
 

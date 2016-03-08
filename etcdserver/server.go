@@ -737,7 +737,7 @@ func (s *EtcdServer) StopNotify() <-chan struct{} { return s.done }
 // an error.
 func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 	r.ID = s.reqIDGen.Next()
-	if r.Method == "GET" && r.Quorum || r.NoQuorumRequest {
+	if r.Method == "GET" && (r.Quorum || r.NoQuorumRequest) {
 		r.Method = "QGET"
 	}
 	switch r.Method {
