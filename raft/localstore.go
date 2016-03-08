@@ -13,6 +13,8 @@ import (
 	"github.com/coreos/etcd/wal"
 	//"github.com/coreos/etcd/wal/walpb"
 	//"github.com/coreos/etcd/etcdserver/etcdserverpb"
+	"errors"
+	"fmt"
 	"github.com/coreos/etcd/store"
 	"path"
 )
@@ -91,12 +93,14 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 		if entry.CompareMessage(ent) {
 			//TODO: choose better (based on index and term)
 			if entry.Term > ent.Term {
-				plog.Infof("Conflict found, localstore already has entry %s, but with higher term", ent.Print())
-				return nil, nil
+				errStr := fmt.Sprintf("Conflict found, localstore already has entry %s, but with higher term", ent.Print())
+				plog.Infof(errStr)
+				return nil, errors.New(errStr)
 			} else if entry.Term == ent.Term {
 				if entry.Timestamp >= ent.Timestamp {
-					plog.Infof("Conflict found, localstore already has entry %s, but with higher timestamp", ent.Print())
-					return nil, nil
+					errStr := fmt.Sprintf("Conflict found, localstore already has entry %s, but with higher timestamp", ent.Print())
+					plog.Infof(errStr)
+					return nil, errors.New(errStr)
 				}
 			}
 			ls.ents[index].Data = nil
@@ -117,7 +121,7 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 	event, err := ls.kvStore.Set(r.Path, r.Dir, r.Val, store.Permanent)
 	if err != nil {
 		plog.Infof("Could not write entry to local KV store")
-		event = nil
+		return nil, err
 	}
 	event.Action = "noQuorumSet"
 	return event, nil

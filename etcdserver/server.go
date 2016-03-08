@@ -68,7 +68,7 @@ const (
 	// (since it will timeout).
 	monitorVersionInterval = rafthttp.ConnWriteTimeout - time.Second
 
-	monitorLocalStoreInterval = 5 * time.Second
+	monitorLocalStoreInterval = 2 * time.Second
 
 	databaseFilename = "db"
 	// max number of in-flight snapshot messages etcdserver allows to have
@@ -99,10 +99,9 @@ func init() {
 }
 
 type Response struct {
-	Event            *store.Event
-	Watcher          store.Watcher
-	NoQuorumResponse string
-	err              error
+	Event   *store.Event
+	Watcher store.Watcher
+	err     error
 }
 
 type Server interface {
@@ -763,12 +762,7 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 				plog.Infof("Error during MaybeAdd, error: %s", err.Error())
 				return Response{}, err
 			}
-
-			if event != nil {
-				return Response{Event: event}, nil
-			} else {
-				return Response{NoQuorumResponse: "Request has not been saved, newer entry is already present"}, nil
-			}
+			return Response{Event: event}, nil
 		}
 
 		ch := s.w.Register(r.ID)

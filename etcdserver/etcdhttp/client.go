@@ -161,6 +161,13 @@ func (h *keysHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if rr.PrevValue != "" && ( !rr.Quorum || rr.NoQuorumRequest ) {
+		swapError := errors.New("Request with defined required previous value can't be committed without quorum")
+		writeKeyError(w, swapError)
+		reportRequestFailed(rr, swapError)
+		return
+	}
+
 	if rr.Method == "PUT" && !rr.Quorum && !rr.NoQuorumRequest {
 		nqputError := errors.New("PUT request's 'Quorum' field has to be true. For no-quorum PUT set 'NoQuorumRequest' to true")
 		writeKeyError(w, nqputError)
@@ -204,13 +211,6 @@ func (h *keysHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultWatchTimeout)
 		defer cancel()
 		handleKeyWatch(ctx, w, resp.Watcher, rr.Stream, h.timer)
-	case resp.NoQuorumResponse != "":
-		//TODO: rewrite response creation
-		w.Header().Add("X-Etcd-Index", fmt.Sprint(0))
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(0)
-		j, _ := json.Marshal(resp.NoQuorumResponse)
-		fmt.Fprintln(w, string(j))
 	default:
 		writeKeyError(w, errors.New("received response with no Event/Watcher!"))
 	}
