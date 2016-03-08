@@ -168,7 +168,6 @@ func startPeer(transport *Transport, urls types.URLs, local, to, cid types.ID, r
 					continue
 				}
 				if m.Type == raftpb.MsgProp {
-					plog.Infof("peer received message to send to peer")
 				}
 				writec, name := p.pick(m)
 				select {
