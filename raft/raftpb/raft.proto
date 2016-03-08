@@ -66,6 +66,7 @@ message Message {
 	optional Snapshot    snapshot    = 9  [(gogoproto.nullable) = false];
 	optional bool        reject      = 10 [(gogoproto.nullable) = false];
 	optional uint64      rejectHint  = 11 [(gogoproto.nullable) = false];
+	optional int64       timestamp   = 12 [(gogoproto.nullable) = false];
 }
 
 message HardState {
