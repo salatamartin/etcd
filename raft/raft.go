@@ -818,8 +818,6 @@ func stepFollower(r *raft, m pb.Message) {
 		if len(r.RaftLog.Localstore.Entries()) == 0 {
 			break
 		}
-		//TODO: handle localstore
-		//TODO: implement timeout (we don't want to send the same entries every heartbeat)
 		var ctx context.Context
 		var cancel context.CancelFunc
 
@@ -827,7 +825,6 @@ func stepFollower(r *raft, m pb.Message) {
 		if ctx == nil {
 			ctx, cancel = context.WithTimeout(context.Background(), pushLocalStoreDeadline)
 			r.RaftLog.Localstore.SetContext(ctx, cancel)
-			//TODO: push entries from here
 			r.pushLocalStore(m.From)
 		} else {
 			select {

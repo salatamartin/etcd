@@ -1396,7 +1396,6 @@ func (s *EtcdServer) monitorLocalStore() {
 				Index:  s.Index(),
 				Commit: uint64(toCommit.Timestamp),
 			}
-			//TODO: send ack to original receiver of NQPUT version of this message
 			s.r.Raft().AddMsgToSend(response)
 		}
 		cancel()

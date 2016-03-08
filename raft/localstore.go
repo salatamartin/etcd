@@ -91,7 +91,6 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 	defer ls.entsMutex.Unlock()
 	for index, entry := range ls.ents {
 		if entry.CompareMessage(ent) {
-			//TODO: choose better (based on index and term)
 			if entry.Term > ent.Term {
 				errStr := fmt.Sprintf("Conflict found, localstore already has entry %s, but with higher term", ent.Print())
 				plog.Infof(errStr)
@@ -140,9 +139,8 @@ func (ls *localStore) Merge(ents []pb.Entry) {
 		if entryToMerge.Data == nil {
 			continue
 		}
-		if _, err := ls.MaybeAdd(entryToMerge); err != nil {
-			//TODO: write to log about error
-		}
+		//errors produced by MaybeAdd are already handled inside function
+		ls.MaybeAdd(entryToMerge)
 	}
 }
 
@@ -159,7 +157,6 @@ func (ls *localStore) SetContext(ctx context.Context, cancel context.CancelFunc)
 	ls.cancel = cancel
 }
 
-//TODO: write tests
 func (ls *localStore) TrimWithLastSent() {
 	ls.waitingForCommit = append(ls.waitingForCommit, ls.ents[:ls.LastSent()]...)
 	ls.ents = ls.ents[ls.LastSent():]
