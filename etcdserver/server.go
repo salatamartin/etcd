@@ -419,6 +419,7 @@ func (s *EtcdServer) Start() {
 	go monitorFileDescriptor(s.done)
 	go s.monitorVersions()
 	go s.monitorLocalStore()
+	go s.logLocalStoreState()
 }
 
 // start prepares and starts server in a new goroutine. It is no longer safe to
@@ -756,7 +757,7 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 				Receiver:  uint64(s.ID()),
 				Data:      data,
 			}
-			plog.Infof("NQPUT request received: %v", r)
+			//plog.Infof("NQPUT request received: %v", r)
 			event, err := s.r.Raft().RaftLog.Localstore.MaybeAdd(entry)
 			if err != nil {
 				plog.Infof("Error during MaybeAdd, error: %s", err.Error())
@@ -1362,6 +1363,10 @@ func (s *EtcdServer) monitorLocalStore() {
 			return
 		}
 
+		if s.r.lead != uint64(s.id) {
+			continue
+		}
+		plog.Infof("Starting monitorLocalStore cycle")
 		lStore := &s.r.Raft().RaftLog.Localstore
 
 		//wait until localstore is initialised
@@ -1387,7 +1392,7 @@ func (s *EtcdServer) monitorLocalStore() {
 				continue
 			}
 			(*lStore).RemoveFirst(1)
-
+			//plog.Infof("Successfully committed NQPUT request: %s", toCommit.Print())
 			response := raftpb.Message{
 				Type:   raftpb.MsgLocalStoreCommited,
 				To:     toCommit.Receiver,
@@ -1401,4 +1406,24 @@ func (s *EtcdServer) monitorLocalStore() {
 		cancel()
 	}
 
+}
+
+func (s *EtcdServer) logLocalStoreState() {
+	for {
+		select {
+		case <-time.After(100 * time.Second):
+		case <-s.done:
+			return
+		}
+
+		lStore := &s.r.Raft().RaftLog.Localstore
+
+		//wait until localstore is initialised
+		if lStore == nil {
+			continue
+		}
+
+		plog.Infof("State of localStore.Entries: %s", raft.FormatEnts(s.r.Raft().RaftLog.Localstore.Entries()))
+		plog.Infof("State of localStore.WaitingForCommit: %s", raft.FormatEnts(s.r.Raft().RaftLog.Localstore.WaitingForCommitEntries()))
+	}
 }

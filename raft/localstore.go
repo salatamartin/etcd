@@ -34,10 +34,16 @@ type LocalStore interface {
 
 	Entries() []pb.Entry
 
+	WaitingForCommitEntries() []pb.Entry
+
 	//actually returns index of first entry not sent
 	LastSent() uint64
 
 	SetLastSent(index uint64)
+
+	LastTimestampSent() int64
+
+	SetLastTimestampSent(index int64)
 
 	Context() (context.Context, context.CancelFunc)
 
@@ -59,18 +65,19 @@ type LocalStore interface {
 }
 
 type localStore struct {
-	entsMutex        sync.Mutex
-	waitingMutex     sync.Mutex
-	walMutex         sync.Mutex
-	ents             []pb.Entry
-	waitingForCommit []pb.Entry
-	wal              *wal.WAL
-	logger           Logger
-	lastIndexSent    uint64
-	lastInWal        uint64
-	context          context.Context
-	cancel           context.CancelFunc
-	kvStore          store.Store
+	entsMutex         sync.Mutex
+	waitingMutex      sync.Mutex
+	walMutex          sync.Mutex
+	ents              []pb.Entry
+	waitingForCommit  []pb.Entry
+	wal               *wal.WAL
+	logger            Logger
+	lastIndexSent     uint64
+	lastTimestampSent int64
+	lastInWal         uint64
+	context           context.Context
+	cancel            context.CancelFunc
+	kvStore           store.Store
 }
 
 func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) *localStore {
@@ -108,7 +115,7 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 		}
 	}
 	ls.ents = append(ls.ents, ent)
-	ls.logger.Infof("Local log after MaybeAdd: %s", FormatEnts(ls.ents))
+	//ls.logger.Infof("Local log after MaybeAdd: %s", FormatEnts(ls.ents))
 	//we have to wait until log is persisted on disk before continuing
 	ls.walMutex.Lock()
 	ls.lastInWal++
@@ -135,6 +142,8 @@ func (ls *localStore) Clear() {
 
 func (ls *localStore) Entries() []pb.Entry { return ls.ents }
 
+func (ls *localStore) WaitingForCommitEntries() []pb.Entry { return ls.waitingForCommit }
+
 func (ls *localStore) Merge(ents []pb.Entry) {
 	for _, entryToMerge := range ents {
 		if entryToMerge.Data == nil {
@@ -151,6 +160,12 @@ func (ls *localStore) SetLastSent(index uint64) {
 	ls.lastIndexSent = index
 }
 
+func (ls *localStore) LastTimestampSent() int64 { return ls.lastTimestampSent }
+
+func (ls *localStore) SetLastTimestampSent(ts int64) {
+	ls.lastTimestampSent = ts
+}
+
 func (ls *localStore) Context() (context.Context, context.CancelFunc) { return ls.context, ls.cancel }
 
 func (ls *localStore) SetContext(ctx context.Context, cancel context.CancelFunc) {
@@ -159,8 +174,18 @@ func (ls *localStore) SetContext(ctx context.Context, cancel context.CancelFunc)
 }
 
 func (ls *localStore) TrimWithLastSent() {
-	ls.waitingForCommit = append(ls.waitingForCommit, ls.ents[:ls.LastSent()]...)
-	ls.ents = ls.ents[ls.LastSent():]
+	ls.waitingMutex.Lock()
+	ls.waitingForCommit = append(ls.waitingForCommit, ls.ents[:ls.LastSent()-1]...)
+	ls.waitingMutex.Unlock()
+
+	ls.entsMutex.Lock()
+	if uint64(len(ls.ents)) <= ls.LastSent() {
+		ls.ents = []pb.Entry{}
+	} else {
+		ls.ents = ls.ents[ls.LastSent()-1:]
+	}
+	ls.entsMutex.Unlock()
+
 	ls.SetLastSent(0)
 }
 
@@ -186,6 +211,9 @@ func (ls *localStore) RemoveFirst(count uint64) {
 		return
 	}
 	ls.ents = ls.ents[count:]
+	if len(ls.ents) == 0 && len(ls.waitingForCommit) == 0 {
+		go ls.resetLocalWal()
+	}
 }
 
 func (ls *localStore) RemoveFromWaiting(timestamp int64) *pb.Entry {
@@ -198,30 +226,7 @@ func (ls *localStore) RemoveFromWaiting(timestamp int64) *pb.Entry {
 			// if all logs are empty, clear persistent storage (not needed anymore)
 			plog.Infof("Number of NQPUTs: not yet received by leader: %d, not yet committed: %d", len(ls.ents), len(ls.waitingForCommit))
 			if len(ls.ents) == 0 && len(ls.waitingForCommit) == 0 {
-				go func() {
-					ls.walMutex.Lock()
-					defer ls.walMutex.Unlock()
-					ls.wal.Close()
-					files, err := ioutil.ReadDir(ls.wal.GetDir())
-					if err != nil {
-						plog.Infof("Error at ioutil: %v", err)
-						return
-					}
-					for _, file := range files {
-						if error := os.Remove(path.Join(ls.wal.GetDir(), file.Name())); error != nil {
-							plog.Infof("Could not remove file %s, error:%v", file.Name(), error)
-						}
-					}
-					//var walsnap walpb.Snapshot
-					newWal, error := wal.Create(ls.wal.GetDir(), nil)
-					if error != nil {
-						plog.Infof("Could not open new wal at %s: %v", ls.wal.GetDir(), error)
-						return
-					}
-					ls.wal = newWal
-					ls.lastInWal = 0
-					plog.Infof("SUccessfully removed all entries from persistent storage")
-				}()
+				go ls.resetLocalWal()
 			}
 
 			//remove entry from KV store
@@ -241,9 +246,34 @@ func (ls *localStore) RemoveFromWaiting(timestamp int64) *pb.Entry {
 func FormatEnts(ents []pb.Entry) string {
 	var buffer bytes.Buffer
 	for _, ent := range ents {
-		buffer.WriteString(ent.Print())
+		buffer.WriteString(fmt.Sprintf("%s\n", ent.Print()))
 	}
 	return buffer.String()
 }
 
 func (ls *localStore) KVStore() store.Store { return ls.kvStore }
+
+func (ls *localStore) resetLocalWal() {
+	ls.walMutex.Lock()
+	defer ls.walMutex.Unlock()
+	ls.wal.Close()
+	files, err := ioutil.ReadDir(ls.wal.GetDir())
+	if err != nil {
+		plog.Infof("Error at ioutil: %v", err)
+		return
+	}
+	for _, file := range files {
+		if error := os.Remove(path.Join(ls.wal.GetDir(), file.Name())); error != nil {
+			plog.Infof("Could not remove file %s, error:%v", file.Name(), error)
+		}
+	}
+	//var walsnap walpb.Snapshot
+	newWal, error := wal.Create(ls.wal.GetDir(), nil)
+	if error != nil {
+		plog.Infof("Could not open new wal at %s: %v", ls.wal.GetDir(), error)
+		return
+	}
+	ls.wal = newWal
+	ls.lastInWal = 0
+	plog.Infof("SUccessfully removed all entries from persistent storage")
+}

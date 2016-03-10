@@ -660,13 +660,14 @@ func stepLeader(r *raft, m pb.Message) {
 		r.send(pb.Message{To: m.From, Type: pb.MsgVoteResp, Reject: true})
 		return
 	case pb.MsgLocalStoreMerge:
-		plog.Infof("Received local store from %x to merge: %s", m.From, FormatEnts(m.Entries))
+		//plog.Infof("Received local store from %x to merge: %s", m.From, FormatEnts(m.Entries))
 		go func(m pb.Message) {
 			r.RaftLog.Localstore.Merge(m.Entries)
 			response := pb.Message{
-				Type:  pb.MsgLocalStoreResp,
-				To:    m.From,
-				Index: m.Index,
+				Type:      pb.MsgLocalStoreResp,
+				To:        m.From,
+				Index:     m.Index,
+				Timestamp: m.Timestamp,
 			}
 			r.send(response)
 			r.RaftLog.Localstore.TruncateEmpty()
@@ -675,6 +676,7 @@ func stepLeader(r *raft, m pb.Message) {
 		//plog.Infof("Leader's localStore after merge: %v", m.Entries)
 		return
 	case pb.MsgLocalStoreCommited:
+		plog.Infof("Received my own Local store commieted message")
 		handleMsgLocalStoreCommited(r, m)
 		return
 	}
@@ -795,7 +797,10 @@ func stepCandidate(r *raft, m pb.Message) {
 		case len(r.votes) - gr:
 			r.becomeFollower(r.Term, None)
 		}
+	case pb.MsgLocalStoreCommited:
+		handleMsgLocalStoreCommited(r, m)
 	}
+
 }
 
 func stepFollower(r *raft, m pb.Message) {
@@ -833,7 +838,7 @@ func stepFollower(r *raft, m pb.Message) {
 				plog.Infof("Context is %v", ctx)
 				cancel()
 				r.RaftLog.Localstore.SetContext(nil, nil)
-				r.RaftLog.Localstore.SetLastSent(0)
+				//r.RaftLog.Localstore.SetLastSent(0)
 			default:
 			}
 		}
@@ -853,8 +858,8 @@ func stepFollower(r *raft, m pb.Message) {
 			r.send(pb.Message{To: m.From, Type: pb.MsgVoteResp, Reject: true})
 		}
 	case pb.MsgLocalStoreResp:
-		if m.Index == r.RaftLog.Localstore.LastSent() {
-			plog.Infof("Received MsfLocalStoreResp with valid lastSent, moving log to waitingForCommit")
+		if m.Timestamp == r.RaftLog.Localstore.LastTimestampSent() {
+			plog.Infof("Received MsfLocalStoreResp with valid lastTimestampSent (%v), moving log to waitingForCommit", time.Unix(0,m.Timestamp))
 			r.RaftLog.Localstore.TrimWithLastSent()
 			r.RaftLog.Localstore.SetContext(nil, nil)
 		}
@@ -1010,14 +1015,19 @@ func (r *raft) checkQuorumActive() bool {
 
 func (r *raft) pushLocalStore(to uint64) {
 	ents := r.RaftLog.Localstore.Entries()
-	r.RaftLog.Localstore.SetLastSent(uint64(len(ents)))
+	ls := uint64(len(ents))
+	ts := time.Now().UnixNano()
+	r.RaftLog.Localstore.SetLastSent(ls)
+	r.RaftLog.Localstore.SetLastTimestampSent(ts)
+
 	//TODO: is term and index here necessary?
 	m := pb.Message{
-		Type:    pb.MsgLocalStoreMerge,
-		To:      to,
-		From:    r.id,
-		Entries: ents,
-		Index:   r.RaftLog.Localstore.LastSent(),
+		Type:      pb.MsgLocalStoreMerge,
+		To:        to,
+		From:      r.id,
+		Entries:   ents,
+		Index:     ls,
+		Timestamp: ts,
 	}
 	r.send(m)
 }
