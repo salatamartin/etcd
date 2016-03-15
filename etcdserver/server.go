@@ -71,7 +71,7 @@ const (
 	// (since it will timeout).
 	monitorVersionInterval = rafthttp.ConnWriteTimeout - time.Second
 
-	monitorLocalStoreInterval = 2 * time.Second
+	monitorLocalStoreInterval = 5 * time.Second
 
 	databaseFilename = "db"
 	// max number of in-flight snapshot messages etcdserver allows to have

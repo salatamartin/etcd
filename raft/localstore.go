@@ -20,9 +20,9 @@ import (
 )
 
 const (
-	pushLocalStoreDeadline time.Duration = 5 * time.Second
-	ClusterPrefix                        = "/0"
-	KeysPrefix                           = "/1"
+	pushLocalStoreDeadline = 10 * time.Second
+	ClusterPrefix          = "/0"
+	KeysPrefix             = "/1"
 )
 
 type LocalStore interface {
