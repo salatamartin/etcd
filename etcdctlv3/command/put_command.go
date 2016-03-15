@@ -16,11 +16,13 @@ package command
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 
 	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/spf13/cobra"
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
-	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
+	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/lease"
 )
 
 var (
@@ -30,7 +32,7 @@ var (
 // NewPutCommand returns the cobra command for "put".
 func NewPutCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "put [options] <key> <value>",
+		Use:   "put [options] <key> <value> (<value> can also be given from stdin)",
 		Short: "Put puts the given key into the store.",
 		Long: `
 Put puts the given key into the store.
@@ -40,28 +42,49 @@ Insert '--' for workaround:
 
 $ put <key> -- <value>
 $ put -- <key> <value>
+
+If <value> isn't given as command line arguement, this command tries to read the value from standard input.
+For example,
+$ cat file | put <key>
+will store the content of the file to <key>.
 `,
 		Run: putCommandFunc,
 	}
-	cmd.Flags().StringVar(&leaseStr, "lease", "0", "lease ID attached to the put key")
+	cmd.Flags().StringVar(&leaseStr, "lease", "0", "lease ID (in hexadecimal) to attach to the key")
 	return cmd
 }
 
 // putCommandFunc executes the "put" command.
 func putCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 2 {
-		ExitWithError(ExitBadArgs, fmt.Errorf("put command needs 2 arguments."))
+	key, value, opts := getPutOp(cmd, args)
+
+	resp, err := mustClientFromCmd(cmd).Put(context.TODO(), key, value, opts...)
+	if err != nil {
+		ExitWithError(ExitError, err)
+	}
+	display.Put(*resp)
+}
+
+func getPutOp(cmd *cobra.Command, args []string) (string, string, []clientv3.OpOption) {
+	if len(args) == 0 {
+		ExitWithError(ExitBadArgs, fmt.Errorf("put command needs 1 argument and input from stdin or 2 arguments."))
+	}
+
+	key := args[0]
+	value, err := argOrStdin(args, os.Stdin, 1)
+	if err != nil {
+		ExitWithError(ExitBadArgs, fmt.Errorf("put command needs 1 argument and input from stdin or 2 arguments."))
 	}
 
 	id, err := strconv.ParseInt(leaseStr, 16, 64)
 	if err != nil {
-		ExitWithError(ExitBadArgs, fmt.Errorf("bad lease ID arg (%v), expecting ID in Hex", err))
+		ExitWithError(ExitBadArgs, fmt.Errorf("bad lease ID (%v), expecting ID in Hex", err))
 	}
 
-	key := []byte(args[0])
-	value := []byte(args[1])
+	opts := []clientv3.OpOption{}
+	if id != 0 {
+		opts = append(opts, clientv3.WithLease(lease.LeaseID(id)))
+	}
 
-	req := &pb.PutRequest{Key: key, Value: value, Lease: id}
-	mustClient(cmd).KV.Put(context.Background(), req)
-	fmt.Printf("%s %s\n", key, value)
+	return key, value, opts
 }

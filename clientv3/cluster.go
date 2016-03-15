@@ -23,6 +23,7 @@ import (
 )
 
 type (
+	Member               pb.Member
 	MemberListResponse   pb.MemberListResponse
 	MemberAddResponse    pb.MemberAddResponse
 	MemberRemoveResponse pb.MemberRemoveResponse
@@ -30,8 +31,11 @@ type (
 )
 
 type Cluster interface {
-	// List lists the current cluster membership.
+	// MemberList lists the current cluster membership.
 	MemberList(ctx context.Context) (*MemberListResponse, error)
+
+	// MemberLeader returns the current leader member.
+	MemberLeader(ctx context.Context) (*Member, error)
 
 	// MemberAdd adds a new member into the cluster.
 	MemberAdd(ctx context.Context, peerAddrs []string) (*MemberAddResponse, error)
@@ -69,7 +73,7 @@ func (c *cluster) MemberAdd(ctx context.Context, peerAddrs []string) (*MemberAdd
 		return (*MemberAddResponse)(resp), nil
 	}
 
-	if isRPCError(err) {
+	if isHalted(ctx, err) {
 		return nil, err
 	}
 
@@ -84,7 +88,7 @@ func (c *cluster) MemberRemove(ctx context.Context, id uint64) (*MemberRemoveRes
 		return (*MemberRemoveResponse)(resp), nil
 	}
 
-	if isRPCError(err) {
+	if isHalted(ctx, err) {
 		return nil, err
 	}
 
@@ -101,7 +105,7 @@ func (c *cluster) MemberUpdate(ctx context.Context, id uint64, peerAddrs []strin
 			return (*MemberUpdateResponse)(resp), nil
 		}
 
-		if isRPCError(err) {
+		if isHalted(ctx, err) {
 			return nil, err
 		}
 
@@ -120,7 +124,7 @@ func (c *cluster) MemberList(ctx context.Context) (*MemberListResponse, error) {
 			return (*MemberListResponse)(resp), nil
 		}
 
-		if isRPCError(err) {
+		if isHalted(ctx, err) {
 			return nil, err
 		}
 
@@ -129,6 +133,19 @@ func (c *cluster) MemberList(ctx context.Context) (*MemberListResponse, error) {
 			return nil, err
 		}
 	}
+}
+
+func (c *cluster) MemberLeader(ctx context.Context) (*Member, error) {
+	resp, err := c.MemberList(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range resp.Members {
+		if m.IsLeader {
+			return (*Member)(m), nil
+		}
+	}
+	return nil, nil
 }
 
 func (c *cluster) getRemote() pb.ClusterClient {

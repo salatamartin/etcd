@@ -17,13 +17,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coreos/etcd/clientv3/concurrency"
 	"github.com/coreos/etcd/contrib/recipes"
 )
 
 func TestDoubleBarrier(t *testing.T) {
 	clus := NewClusterV3(t, &ClusterConfig{Size: 3})
 	defer clus.Terminate(t)
-	defer closeSessionLease(clus)
+	defer dropSessionLease(clus)
 
 	waiters := 10
 
@@ -84,7 +85,7 @@ func TestDoubleBarrier(t *testing.T) {
 func TestDoubleBarrierFailover(t *testing.T) {
 	clus := NewClusterV3(t, &ClusterConfig{Size: 3})
 	defer clus.Terminate(t)
-	defer closeSessionLease(clus)
+	defer dropSessionLease(clus)
 
 	waiters := 10
 	donec := make(chan struct{})
@@ -112,18 +113,33 @@ func TestDoubleBarrierFailover(t *testing.T) {
 
 	// wait for barrier enter to unblock
 	for i := 0; i < waiters; i++ {
-		<-donec
+		select {
+		case <-donec:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("timed out waiting for enter, %d", i)
+		}
 	}
 	// kill lease, expect Leave unblock
-	recipe.RevokeSessionLease(clus.clients[0])
+	s, err := concurrency.NewSession(clus.clients[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
 	// join on rest of waiters
 	for i := 0; i < waiters-1; i++ {
-		<-donec
+		select {
+		case <-donec:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("timed out waiting for leave, %d", i)
+		}
 	}
 }
 
-func closeSessionLease(clus *ClusterV3) {
+func dropSessionLease(clus *ClusterV3) {
 	for _, client := range clus.clients {
-		recipe.StopSessionLease(client)
+		s, _ := concurrency.NewSession(client)
+		s.Orphan()
 	}
 }

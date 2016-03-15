@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/lease"
+	"github.com/coreos/etcd/pkg/schedule"
 	"github.com/coreos/etcd/pkg/testutil"
 	"github.com/coreos/etcd/storage/backend"
 	"github.com/coreos/etcd/storage/storagepb"
@@ -32,6 +33,7 @@ import (
 func TestStoreRev(t *testing.T) {
 	b, tmpPath := backend.NewDefaultTmpBackend()
 	s := NewStore(b, &lease.FakeLessor{})
+	defer s.Close()
 	defer os.Remove(tmpPath)
 
 	for i := 1; i <= 3; i++ {
@@ -43,9 +45,22 @@ func TestStoreRev(t *testing.T) {
 }
 
 func TestStorePut(t *testing.T) {
+	kv := storagepb.KeyValue{
+		Key:            []byte("foo"),
+		Value:          []byte("bar"),
+		CreateRevision: 1,
+		ModRevision:    2,
+		Version:        1,
+	}
+	kvb, err := kv.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	tests := []struct {
 		rev revision
 		r   indexGetResp
+		rr  *rangeResp
 
 		wrev    revision
 		wkey    []byte
@@ -55,6 +70,8 @@ func TestStorePut(t *testing.T) {
 		{
 			revision{1, 0},
 			indexGetResp{revision{}, revision{}, 0, ErrRevisionNotFound},
+			nil,
+
 			revision{1, 1},
 			newTestKeyBytes(revision{2, 0}, false),
 			storagepb.KeyValue{
@@ -70,6 +87,8 @@ func TestStorePut(t *testing.T) {
 		{
 			revision{1, 1},
 			indexGetResp{revision{2, 0}, revision{2, 0}, 1, nil},
+			&rangeResp{[][]byte{newTestKeyBytes(revision{2, 1}, false)}, [][]byte{kvb}},
+
 			revision{1, 2},
 			newTestKeyBytes(revision{2, 1}, false),
 			storagepb.KeyValue{
@@ -85,6 +104,8 @@ func TestStorePut(t *testing.T) {
 		{
 			revision{2, 0},
 			indexGetResp{revision{2, 1}, revision{2, 0}, 2, nil},
+			&rangeResp{[][]byte{newTestKeyBytes(revision{2, 1}, false)}, [][]byte{kvb}},
+
 			revision{2, 1},
 			newTestKeyBytes(revision{3, 0}, false),
 			storagepb.KeyValue{
@@ -106,6 +127,9 @@ func TestStorePut(t *testing.T) {
 		s.currentRev = tt.rev
 		s.tx = b.BatchTx()
 		fi.indexGetRespc <- tt.r
+		if tt.rr != nil {
+			b.tx.rangeRespc <- *tt.rr
+		}
 
 		s.put([]byte("foo"), []byte("bar"), lease.LeaseID(i+1))
 
@@ -113,9 +137,18 @@ func TestStorePut(t *testing.T) {
 		if err != nil {
 			t.Errorf("#%d: marshal err = %v, want nil", i, err)
 		}
+
 		wact := []testutil.Action{
 			{"put", []interface{}{keyBucketName, tt.wkey, data}},
 		}
+
+		if tt.rr != nil {
+			wact = []testutil.Action{
+				{"range", []interface{}{keyBucketName, newTestKeyBytes(tt.r.rev, false), []byte(nil), int64(0)}},
+				{"put", []interface{}{keyBucketName, tt.wkey, data}},
+			}
+		}
+
 		if g := b.tx.Action(); !reflect.DeepEqual(g, wact) {
 			t.Errorf("#%d: tx action = %+v, want %+v", i, g, wact)
 		}
@@ -129,6 +162,8 @@ func TestStorePut(t *testing.T) {
 		if s.currentRev != tt.wrev {
 			t.Errorf("#%d: rev = %+v, want %+v", i, s.currentRev, tt.wrev)
 		}
+
+		s.Close()
 	}
 }
 
@@ -198,13 +233,29 @@ func TestStoreRange(t *testing.T) {
 		if s.currentRev != currev {
 			t.Errorf("#%d: current rev = %+v, want %+v", i, s.currentRev, currev)
 		}
+
+		s.Close()
 	}
 }
 
 func TestStoreDeleteRange(t *testing.T) {
+	key := newTestKeyBytes(revision{2, 0}, false)
+	kv := storagepb.KeyValue{
+		Key:            []byte("foo"),
+		Value:          []byte("bar"),
+		CreateRevision: 1,
+		ModRevision:    2,
+		Version:        1,
+	}
+	kvb, err := kv.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	tests := []struct {
 		rev revision
 		r   indexRangeResp
+		rr  rangeResp
 
 		wkey    []byte
 		wrev    revision
@@ -214,6 +265,8 @@ func TestStoreDeleteRange(t *testing.T) {
 		{
 			revision{2, 0},
 			indexRangeResp{[][]byte{[]byte("foo")}, []revision{{2, 0}}},
+			rangeResp{[][]byte{key}, [][]byte{kvb}},
+
 			newTestKeyBytes(revision{3, 0}, true),
 			revision{2, 1},
 			2,
@@ -222,6 +275,8 @@ func TestStoreDeleteRange(t *testing.T) {
 		{
 			revision{2, 1},
 			indexRangeResp{[][]byte{[]byte("foo")}, []revision{{2, 0}}},
+			rangeResp{[][]byte{key}, [][]byte{kvb}},
+
 			newTestKeyBytes(revision{3, 1}, true),
 			revision{2, 2},
 			3,
@@ -236,6 +291,7 @@ func TestStoreDeleteRange(t *testing.T) {
 		s.currentRev = tt.rev
 		s.tx = b.BatchTx()
 		fi.indexRangeRespc <- tt.r
+		b.tx.rangeRespc <- tt.rr
 
 		n := s.deleteRange([]byte("foo"), []byte("goo"))
 		if n != 1 {
@@ -250,6 +306,7 @@ func TestStoreDeleteRange(t *testing.T) {
 		}
 		wact := []testutil.Action{
 			{"put", []interface{}{keyBucketName, tt.wkey, data}},
+			{"range", []interface{}{keyBucketName, newTestKeyBytes(revision{2, 0}, false), []byte(nil), int64(0)}},
 		}
 		if g := b.tx.Action(); !reflect.DeepEqual(g, wact) {
 			t.Errorf("#%d: tx action = %+v, want %+v", i, g, wact)
@@ -269,6 +326,7 @@ func TestStoreDeleteRange(t *testing.T) {
 
 func TestStoreCompact(t *testing.T) {
 	s := newFakeStore()
+	defer s.Close()
 	b := s.b.(*fakeBackend)
 	fi := s.kvindex.(*fakeIndex)
 
@@ -279,7 +337,7 @@ func TestStoreCompact(t *testing.T) {
 	b.tx.rangeRespc <- rangeResp{[][]byte{key1, key2}, nil}
 
 	s.Compact(3)
-	s.wg.Wait()
+	s.fifoSched.WaitFinish(1)
 
 	if s.compactMainRev != 3 {
 		t.Errorf("compact main rev = %d, want 3", s.compactMainRev)
@@ -494,6 +552,8 @@ func newFakeStore() *store {
 		kvindex:        fi,
 		currentRev:     revision{},
 		compactMainRev: -1,
+		fifoSched:      schedule.NewFIFOScheduler(),
+		stopc:          make(chan struct{}),
 	}
 }
 
@@ -533,6 +593,7 @@ func (b *fakeBackend) Hash() (uint32, error)      { return 0, nil }
 func (b *fakeBackend) Size() int64                { return 0 }
 func (b *fakeBackend) Snapshot() backend.Snapshot { return nil }
 func (b *fakeBackend) ForceCommit()               {}
+func (b *fakeBackend) Defrag() error              { return nil }
 func (b *fakeBackend) Close() error               { return nil }
 
 type indexGetResp struct {

@@ -36,6 +36,8 @@ func (st ProgressStateType) String() string { return prstmap[uint64(st)] }
 // progresses of all followers, and sends entries to the follower based on its progress.
 type Progress struct {
 	Match, Next uint64
+	// State defines how the leader should interact with the follower.
+	//
 	// When in ProgressStateProbe, leader sends at most one replication message
 	// per heartbeat interval. It also probes actual progress of the follower.
 	//
@@ -115,7 +117,6 @@ func (pr *Progress) maybeUpdate(n uint64) bool {
 	if pr.Next < n+1 {
 		pr.Next = n + 1
 	}
-	//plog.Infof("Log's Match after maybeUpdate is %d (updated is %t)", pr.Match, updated)
 	return updated
 }
 

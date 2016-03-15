@@ -29,6 +29,14 @@ import (
 	"github.com/coreos/etcd/storage/storagepb"
 )
 
+const (
+	// the max request size that raft accepts.
+	// TODO: make this a flag? But we probably do not want to
+	// accept large request which might block raft stream. User
+	// specify a large value might end up with shooting in the foot.
+	maxRequestBytes = 1.5 * 1024 * 1024
+)
+
 type RaftKV interface {
 	Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeResponse, error)
 	Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, error)
@@ -49,7 +57,15 @@ type Lessor interface {
 	LeaseRenew(id lease.LeaseID) (int64, error)
 }
 
+type Authenticator interface {
+	AuthEnable(ctx context.Context, r *pb.AuthEnableRequest) (*pb.AuthEnableResponse, error)
+}
+
 func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeResponse, error) {
+	if r.Serializable {
+		return applyRange(noTxn, s.kv, r)
+	}
+
 	result, err := s.processInternalRaftRequest(ctx, pb.InternalRaftRequest{Range: r})
 	if err != nil {
 		return nil, err
@@ -86,7 +102,15 @@ func (s *EtcdServer) Compact(ctx context.Context, r *pb.CompactionRequest) (*pb.
 	if err != nil {
 		return nil, err
 	}
-	return result.resp.(*pb.CompactionResponse), result.err
+	resp := result.resp.(*pb.CompactionResponse)
+	if resp == nil {
+		resp = &pb.CompactionResponse{}
+	}
+	if resp.Header == nil {
+		resp.Header = &pb.ResponseHeader{}
+	}
+	resp.Header.Revision = s.kv.Rev()
+	return resp, result.err
 }
 
 func (s *EtcdServer) Hash(ctx context.Context, r *pb.HashRequest) (*pb.HashResponse, error) {
@@ -94,7 +118,7 @@ func (s *EtcdServer) Hash(ctx context.Context, r *pb.HashRequest) (*pb.HashRespo
 	if err != nil {
 		return nil, err
 	}
-	return &pb.HashResponse{Hash: h}, nil
+	return &pb.HashResponse{Header: &pb.ResponseHeader{Revision: s.kv.Rev()}, Hash: h}, nil
 }
 
 func (s *EtcdServer) LeaseCreate(ctx context.Context, r *pb.LeaseCreateRequest) (*pb.LeaseCreateResponse, error) {
@@ -153,6 +177,14 @@ func (s *EtcdServer) LeaseRenew(id lease.LeaseID) (int64, error) {
 	return ttl, err
 }
 
+func (s *EtcdServer) AuthEnable(ctx context.Context, r *pb.AuthEnableRequest) (*pb.AuthEnableResponse, error) {
+	result, err := s.processInternalRaftRequest(ctx, pb.InternalRaftRequest{AuthEnable: r})
+	if err != nil {
+		return nil, err
+	}
+	return result.resp.(*pb.AuthEnableResponse), result.err
+}
+
 type applyResult struct {
 	resp proto.Message
 	err  error
@@ -165,6 +197,11 @@ func (s *EtcdServer) processInternalRaftRequest(ctx context.Context, r pb.Intern
 	if err != nil {
 		return nil, err
 	}
+
+	if len(data) > maxRequestBytes {
+		return nil, ErrRequestTooLarge
+	}
+
 	ch := s.w.Register(r.ID)
 
 	s.r.Propose(ctx, data)
@@ -213,6 +250,8 @@ func (s *EtcdServer) applyV3Request(r *pb.InternalRaftRequest) interface{} {
 		ar.resp, ar.err = applyLeaseCreate(le, r.LeaseCreate)
 	case r.LeaseRevoke != nil:
 		ar.resp, ar.err = applyLeaseRevoke(le, r.LeaseRevoke)
+	case r.AuthEnable != nil:
+		ar.resp, ar.err = applyAuthEnable(s)
 	default:
 		panic("not implemented")
 	}
@@ -294,6 +333,10 @@ func applyRange(txnID int64, kv dstorage.KV, r *pb.RangeRequest) (*pb.RangeRespo
 		err error
 	)
 
+	if isGteRange(r.RangeEnd) {
+		r.RangeEnd = []byte{}
+	}
+
 	limit := r.Limit
 	if r.SortOrder != pb.RangeRequest_NONE {
 		// fetch everything; sort and truncate afterwards
@@ -355,19 +398,25 @@ func applyDeleteRange(txnID int64, kv dstorage.KV, dr *pb.DeleteRangeRequest) (*
 	resp.Header = &pb.ResponseHeader{}
 
 	var (
+		n   int64
 		rev int64
 		err error
 	)
 
+	if isGteRange(dr.RangeEnd) {
+		dr.RangeEnd = []byte{}
+	}
+
 	if txnID != noTxn {
-		_, rev, err = kv.TxnDeleteRange(txnID, dr.Key, dr.RangeEnd)
+		n, rev, err = kv.TxnDeleteRange(txnID, dr.Key, dr.RangeEnd)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		_, rev = kv.DeleteRange(dr.Key, dr.RangeEnd)
+		n, rev = kv.DeleteRange(dr.Key, dr.RangeEnd)
 	}
 
+	resp.Deleted = n
 	resp.Header.Revision = rev
 	return resp, nil
 }
@@ -599,4 +648,15 @@ func compareInt64(a, b int64) int {
 	default:
 		return 0
 	}
+}
+
+// isGteRange determines if the range end is a >= range. This works around grpc
+// sending empty byte strings as nil; >= is encoded in the range end as '\0'.
+func isGteRange(rangeEnd []byte) bool {
+	return len(rangeEnd) == 1 && rangeEnd[0] == 0
+}
+
+func applyAuthEnable(s *EtcdServer) (*pb.AuthEnableResponse, error) {
+	s.AuthStore().AuthEnable()
+	return &pb.AuthEnableResponse{}, nil
 }

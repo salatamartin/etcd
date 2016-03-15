@@ -16,10 +16,14 @@ package main
 
 import (
 	"flag"
-	"log"
 	"net/http"
 	"strings"
+
+	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
+	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/prometheus/client_golang/prometheus"
 )
+
+var plog = capnslog.NewPackageLogger("github.com/coreos/etcd", "etcd-tester")
 
 func main() {
 	endpointStr := flag.String("agent-endpoints", "localhost:9027", "HTTP RPC endpoints of agents. Do not specify the schema.")
@@ -33,7 +37,7 @@ func main() {
 	endpoints := strings.Split(*endpointStr, ",")
 	c, err := newCluster(endpoints, *datadir, *stressKeySize, *stressKeySuffixRange, *isV2Only)
 	if err != nil {
-		log.Fatal(err)
+		plog.Fatal(err)
 	}
 	defer c.Terminate()
 
@@ -42,7 +46,9 @@ func main() {
 			newFailureKillAll(),
 			newFailureKillMajority(),
 			newFailureKillOne(),
+			newFailureKillLeader(),
 			newFailureKillOneForLongTime(),
+			newFailureKillLeaderForLongTime(),
 			newFailureIsolate(),
 			newFailureIsolateAll(),
 		},
@@ -52,7 +58,8 @@ func main() {
 
 	sh := statusHandler{status: &t.status}
 	http.Handle("/status", sh)
-	go func() { log.Fatal(http.ListenAndServe(":9028", nil)) }()
+	http.Handle("/metrics", prometheus.Handler())
+	go func() { plog.Fatal(http.ListenAndServe(":9028", nil)) }()
 
 	t.runLoop()
 }

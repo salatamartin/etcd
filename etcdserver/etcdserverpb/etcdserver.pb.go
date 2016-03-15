@@ -50,6 +50,36 @@
 		MemberUpdateResponse
 		MemberListRequest
 		MemberListResponse
+		DefragmentRequest
+		DefragmentResponse
+		AuthEnableRequest
+		AuthDisableRequest
+		AuthenticateRequest
+		UserAddRequest
+		UserGetRequest
+		UserDeleteRequest
+		UserChangePasswordRequest
+		UserGrantRequest
+		UserRevokeRequest
+		RoleAddRequest
+		RoleGetRequest
+		RoleDeleteRequest
+		RoleGrantRequest
+		RoleRevokeRequest
+		AuthEnableResponse
+		AuthDisableResponse
+		AuthenticateResponse
+		UserAddResponse
+		UserGetResponse
+		UserDeleteResponse
+		UserChangePasswordResponse
+		UserGrantResponse
+		UserRevokeResponse
+		RoleAddResponse
+		RoleGetResponse
+		RoleDeleteResponse
+		RoleGrantResponse
+		RoleRevokeResponse
 */
 package etcdserverpb
 
@@ -83,6 +113,7 @@ type Request struct {
 	Stream           bool   `protobuf:"varint,16,opt,name=Stream" json:"Stream"`
 	Blocking         bool   `protobuf:"varint,17,opt,name=Blocking" json:"Blocking"`
 	NoQuorumRequest  bool   `protobuf:"varint,18,opt,name=NoQuorumRequest" json:"NoQuorumRequest"`
+	Refresh          *bool  `protobuf:"varint,19,opt,name=Refresh" json:"Refresh,omitempty"`
 	XXX_unrecognized []byte `json:"-"`
 }
 
@@ -230,6 +261,18 @@ func (m *Request) MarshalTo(data []byte) (int, error) {
 		data[i] = 0
 	}
 	i++
+	if m.Refresh != nil {
+		data[i] = 0x98
+		i++
+		data[i] = 0x1
+		i++
+		if *m.Refresh {
+			data[i] = 1
+		} else {
+			data[i] = 0
+		}
+		i++
+	}
 	if m.XXX_unrecognized != nil {
 		i += copy(data[i:], m.XXX_unrecognized)
 	}
@@ -317,6 +360,9 @@ func (m *Request) Size() (n int) {
 	n += 3
 	n += 3
 	n += 3
+	if m.Refresh != nil {
+		n += 3
+	}
 	if m.XXX_unrecognized != nil {
 		n += len(m.XXX_unrecognized)
 	}
@@ -768,6 +814,27 @@ func (m *Request) Unmarshal(data []byte) error {
 				}
 			}
 			m.NoQuorumRequest = bool(v != 0)
+		case 19:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Refresh", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowEtcdserver
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := data[iNdEx]
+				iNdEx++
+				v |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			b := bool(v != 0)
+			m.Refresh = &b
 		default:
 			iNdEx = preIndex
 			skippy, err := skipEtcdserver(data[iNdEx:])

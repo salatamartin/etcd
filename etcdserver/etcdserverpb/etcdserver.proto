@@ -27,6 +27,7 @@ message Request {
 	optional bool   Stream          = 16 [(gogoproto.nullable) = false];
 	optional bool   Blocking        = 17 [(gogoproto.nullable) = false];
 	optional bool   NoQuorumRequest = 18 [(gogoproto.nullable) = false];
+	optional bool   Refresh         = 19 [(gogoproto.nullable) = true];
 }
 
 message Metadata {

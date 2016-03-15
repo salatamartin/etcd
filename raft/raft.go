@@ -83,54 +83,54 @@ type Config struct {
 	// ID is the identity of the local raft. ID cannot be 0.
 	ID uint64
 
-	// peers contains the IDs of all nodes (including self) in
-	// the raft cluster. It should only be set when starting a new
-	// raft cluster.
-	// Restarting raft from previous configuration will panic if
-	// peers is set.
-	// peer is private and only used for testing right now.
+	// peers contains the IDs of all nodes (including self) in the raft cluster. It
+	// should only be set when starting a new raft cluster. Restarting raft from
+	// previous configuration will panic if peers is set. peer is private and only
+	// used for testing right now.
 	peers []uint64
 
-	// ElectionTick is the election timeout. If a follower does not
-	// receive any message from the leader of current term during
-	// ElectionTick, it will become candidate and start an election.
-	// ElectionTick must be greater than HeartbeatTick. We suggest
-	// to use ElectionTick = 10 * HeartbeatTick to avoid unnecessary
-	// leader switching.
+	// ElectionTick is the number of Node.Tick invocations that must pass between
+	// elections. That is, if a follower does not receive any message from the
+	// leader of current term before ElectionTick has elapsed, it will become
+	// candidate and start an election. ElectionTick must be greater than
+	// HeartbeatTick. We suggest ElectionTick = 10 * HeartbeatTick to avoid
+	// unnecessary leader switching.
 	ElectionTick int
-	// HeartbeatTick is the heartbeat interval. A leader sends heartbeat
-	// message to maintain the leadership every heartbeat interval.
+	// HeartbeatTick is the number of Node.Tick invocations that must pass between
+	// heartbeats. That is, a leader sends heartbeat messages to maintain its
+	// leadership every HeartbeatTick ticks.
 	HeartbeatTick int
 
-	// Storage is the storage for raft. raft generates entries and
-	// states to be stored in storage. raft reads the persisted entries
-	// and states out of Storage when it needs. raft reads out the previous
-	// state and configuration out of storage when restarting.
+	// Storage is the storage for raft. raft generates entries and states to be
+	// stored in storage. raft reads the persisted entries and states out of
+	// Storage when it needs. raft reads out the previous state and configuration
+	// out of storage when restarting.
 	Storage Storage
 	// Applied is the last applied index. It should only be set when restarting
-	// raft. raft will not return entries to the application smaller or equal to Applied.
-	// If Applied is unset when restarting, raft might return previous applied entries.
-	// This is a very application dependent configuration.
+	// raft. raft will not return entries to the application smaller or equal to
+	// Applied. If Applied is unset when restarting, raft might return previous
+	// applied entries. This is a very application dependent configuration.
 	Applied uint64
 
-	// MaxSizePerMsg limits the max size of each append message. Smaller value lowers
-	// the raft recovery cost(initial probing and message lost during normal operation).
-	// On the other side, it might affect the throughput during normal replication.
-	// Note: math.MaxUint64 for unlimited, 0 for at most one entry per message.
+	// MaxSizePerMsg limits the max size of each append message. Smaller value
+	// lowers the raft recovery cost(initial probing and message lost during normal
+	// operation). On the other side, it might affect the throughput during normal
+	// replication. Note: math.MaxUint64 for unlimited, 0 for at most one entry per
+	// message.
 	MaxSizePerMsg uint64
-	// MaxInflightMsgs limits the max number of in-flight append messages during optimistic
-	// replication phase. The application transportation layer usually has its own sending
-	// buffer over TCP/UDP. Setting MaxInflightMsgs to avoid overflowing that sending buffer.
-	// TODO (xiangli): feedback to application to limit the proposal rate?
+	// MaxInflightMsgs limits the max number of in-flight append messages during
+	// optimistic replication phase. The application transportation layer usually
+	// has its own sending buffer over TCP/UDP. Setting MaxInflightMsgs to avoid
+	// overflowing that sending buffer. TODO (xiangli): feedback to application to
+	// limit the proposal rate?
 	MaxInflightMsgs int
 
-	// CheckQuorum specifies if the leader should check quorum activity. Leader steps down when
-	// quorum is not active for an electionTimeout.
+	// CheckQuorum specifies if the leader should check quorum activity. Leader
+	// steps down when quorum is not active for an electionTimeout.
 	CheckQuorum bool
 
-	// logger is the logger used for raft log. For multinode which
-	// can host multiple raft group, each raft group can have its
-	// own logger
+	// Logger is the logger used for raft log. For multinode which can host
+	// multiple raft group, each raft group can have its own logger
 	Logger Logger
 
 	// used in raftLog.LocalStore as persistent storage
@@ -390,7 +390,6 @@ func (r *raft) bcastAppend() {
 		if id == r.id {
 			continue
 		}
-
 		r.sendAppend(id)
 	}
 }
@@ -462,7 +461,6 @@ func (r *raft) appendEntry(es ...pb.Entry) {
 	r.RaftLog.append(es...)
 	r.prs[r.id].maybeUpdate(r.RaftLog.lastIndex())
 	// Regardless of maybeCommit's return, our caller will call bcastAppend.
-
 	r.maybeCommit()
 }
 
@@ -597,7 +595,7 @@ func (r *raft) Step(m pb.Message) error {
 
 	switch {
 	case m.Term == 0:
-	// local message
+		// local message
 	case m.Term > r.Term:
 		lead := m.From
 		if m.Type == pb.MsgVote {
@@ -632,9 +630,6 @@ func stepLeader(r *raft, m pb.Message) {
 		}
 		return
 	case pb.MsgProp:
-		if m.Type == pb.MsgProp {
-			//plog.Infof("raft/raft stepLeader received MsgProp")
-		}
 		if len(m.Entries) == 0 {
 			r.logger.Panicf("%x stepped empty MsgProp", r.id)
 		}
@@ -801,7 +796,6 @@ func stepCandidate(r *raft, m pb.Message) {
 	case pb.MsgLocalStoreCommited:
 		handleMsgLocalStoreCommited(r, m)
 	}
-
 }
 
 func stepFollower(r *raft, m pb.Message) {
@@ -860,7 +854,7 @@ func stepFollower(r *raft, m pb.Message) {
 		}
 	case pb.MsgLocalStoreResp:
 		if m.Timestamp == r.RaftLog.Localstore.LastTimestampSent() {
-			plog.Infof("Received MsfLocalStoreResp with valid lastTimestampSent (%v), moving log to waitingForCommit", time.Unix(0,m.Timestamp))
+			plog.Infof("Received MsfLocalStoreResp with valid lastTimestampSent (%v), moving log to waitingForCommit", time.Unix(0, m.Timestamp))
 			r.RaftLog.Localstore.TrimWithLastSent()
 			r.RaftLog.Localstore.SetContext(nil, nil)
 		}
@@ -1010,7 +1004,7 @@ func (r *raft) checkQuorumActive() bool {
 
 		r.prs[id].RecentActive = false
 	}
-	//plog.Infof("checkQuorumActive is %s", act >= r.quorum())
+
 	return act >= r.quorum()
 }
 

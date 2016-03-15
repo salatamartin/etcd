@@ -21,6 +21,8 @@ You can also build etcdctl from source using the build script found in the paren
 
 ### --no-sync
 + don't synchronize cluster information before sending request
++ Use this to access non-published client endpoints
++ Without this flag, values from `--endpoint` flag will be overwritten by etcd cluster when it does internal sync.
 
 ### --output, -o
 + output response in the given format (`simple`, `extended` or `json`)
@@ -40,6 +42,7 @@ You can also build etcdctl from source using the build script found in the paren
 + a comma-delimited list of machine addresses in the cluster
 + default: `"http://127.0.0.1:4001,http://127.0.0.1:2379"`
 + env variable: ETCDCTL_ENDPOINT
++ Without `--no-sync` flag, this will be overwritten by etcd cluster when it does internal sync.
 
 ### --cert-file
 + identify HTTPS client using this SSL certificate file
@@ -105,6 +108,12 @@ Create a new key `/foo/bar`, only if the key did not previously exist:
 ```
 $ etcdctl mk /foo/new_bar "Hello world"
 Hello world
+```
+
+Create a new in-order key under dir `/fooDir`:
+
+```
+$ etcdctl mk --in-order /fooDir "Hello world"
 ```
 
 Create a new dir `/fooDir`, only if the key did not previously exist:

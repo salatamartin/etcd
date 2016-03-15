@@ -72,6 +72,10 @@ type Lessor interface {
 	// If the lease does not exist, an error will be returned.
 	Attach(id LeaseID, items []LeaseItem) error
 
+	// Detach detaches given leaseItem from the lease with given LeaseID.
+	// If the lease does not exist, an error will be returned.
+	Detach(id LeaseID, items []LeaseItem) error
+
 	// Promote promotes the lessor to be the primary lessor. Primary lessor manages
 	// the expiration and renew of leases.
 	Promote()
@@ -88,6 +92,9 @@ type Lessor interface {
 
 	// ExpiredLeasesC returns a chan that is used to receive expired leases.
 	ExpiredLeasesC() <-chan []*Lease
+
+	// Recover recovers the lessor state from the given backend and RangeDeleter.
+	Recover(b backend.Backend, rd RangeDeleter)
 
 	// Stop stops the lessor for managing leases. The behavior of calling Stop multiple
 	// times is undefined.
@@ -194,12 +201,14 @@ func (le *lessor) Grant(id LeaseID, ttl int64) (*Lease, error) {
 
 func (le *lessor) Revoke(id LeaseID) error {
 	le.mu.Lock()
-	defer le.mu.Unlock()
 
 	l := le.leaseMap[id]
 	if l == nil {
+		le.mu.Unlock()
 		return ErrLeaseNotFound
 	}
+	// unlock before doing external work
+	le.mu.Unlock()
 
 	if le.rd != nil {
 		for item := range l.itemSet {
@@ -207,6 +216,8 @@ func (le *lessor) Revoke(id LeaseID) error {
 		}
 	}
 
+	le.mu.Lock()
+	defer le.mu.Unlock()
 	delete(le.leaseMap, l.ID)
 	l.removeFrom(le.b)
 
@@ -280,6 +291,23 @@ func (le *lessor) Attach(id LeaseID, items []LeaseItem) error {
 
 	for _, it := range items {
 		l.itemSet[it] = struct{}{}
+	}
+	return nil
+}
+
+// Detach detaches items from the lease with given ID.
+// If the given lease does not exist, an error will be returned.
+func (le *lessor) Detach(id LeaseID, items []LeaseItem) error {
+	le.mu.Lock()
+	defer le.mu.Unlock()
+
+	l := le.leaseMap[id]
+	if l == nil {
+		return ErrLeaseNotFound
+	}
+
+	for _, it := range items {
+		delete(l.itemSet, it)
 	}
 	return nil
 }
@@ -451,8 +479,7 @@ func int64ToBytes(n int64) []byte {
 
 // FakeLessor is a fake implementation of Lessor interface.
 // Used for testing only.
-type FakeLessor struct {
-}
+type FakeLessor struct{}
 
 func (fl *FakeLessor) SetRangeDeleter(dr RangeDeleter) {}
 
@@ -461,6 +488,8 @@ func (fl *FakeLessor) Grant(id LeaseID, ttl int64) (*Lease, error) { return nil,
 func (fl *FakeLessor) Revoke(id LeaseID) error { return nil }
 
 func (fl *FakeLessor) Attach(id LeaseID, items []LeaseItem) error { return nil }
+
+func (fl *FakeLessor) Detach(id LeaseID, items []LeaseItem) error { return nil }
 
 func (fl *FakeLessor) Promote() {}
 
@@ -471,5 +500,7 @@ func (fl *FakeLessor) Renew(id LeaseID) (int64, error) { return 10, nil }
 func (le *FakeLessor) Lookup(id LeaseID) *Lease { return nil }
 
 func (fl *FakeLessor) ExpiredLeasesC() <-chan []*Lease { return nil }
+
+func (fl *FakeLessor) Recover(b backend.Backend, rd RangeDeleter) {}
 
 func (fl *FakeLessor) Stop() {}

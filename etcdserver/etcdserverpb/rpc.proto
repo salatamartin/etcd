@@ -76,6 +76,55 @@ service Cluster {
   rpc MemberList(MemberListRequest) returns (MemberListResponse) {}
 }
 
+service Maintenance {
+  // TODO: move Hash from kv to Maintenance
+  rpc Defragment(DefragmentRequest) returns (DefragmentResponse) {}
+}
+
+service Auth {
+  // AuthEnable enables authentication.
+  rpc AuthEnable(AuthEnableRequest) returns (AuthEnableResponse) {}
+
+  // AuthDisable disables authentication.
+  rpc AuthDisable(AuthDisableRequest) returns (AuthDisableResponse) {}
+
+  // Authenticate processes authenticate request.
+  rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse) {}
+
+  // UserAdd adds a new user.
+  rpc UserAdd(UserAddRequest) returns (UserAddResponse) {}
+
+  // UserGet gets a detailed information of a user or lists entire users.
+  rpc UserGet(UserGetRequest) returns (UserGetResponse) {}
+
+  // UserDelete deletes a specified user.
+  rpc UserDelete(UserDeleteRequest) returns (UserDeleteResponse) {}
+
+  // UserChangePassword changes password of a specified user.
+  rpc UserChangePassword(UserChangePasswordRequest) returns (UserChangePasswordResponse) {}
+
+  // UserGrant grants a role to a specified user.
+  rpc UserGrant(UserGrantRequest) returns (UserGrantResponse) {}
+
+  // UserRevoke revokes a role of specified user.
+  rpc UserRevoke(UserRevokeRequest) returns (UserRevokeResponse) {}
+
+  // RoleAdd adds a new role.
+  rpc RoleAdd(RoleAddRequest) returns (RoleAddResponse) {}
+
+  // RoleGet gets a detailed information of a role or lists entire roles.
+  rpc RoleGet(RoleGetRequest) returns (RoleGetResponse) {}
+
+  // RoleDelete deletes a specified role.
+  rpc RoleDelete(RoleDeleteRequest) returns (RoleDeleteResponse) {}
+
+  // RoleGrant grants a permission of a specified key or range to a specified role.
+  rpc RoleGrant(RoleGrantRequest) returns (RoleGrantResponse) {}
+
+  // RoleRevoke revokes a key or range permission of a specified role.
+  rpc RoleRevoke(RoleRevokeRequest) returns (RoleRevokeResponse) {}
+}
+
 message ResponseHeader {
   uint64 cluster_id = 1;
   uint64 member_id = 2;
@@ -101,7 +150,8 @@ message RangeRequest {
 
   // if the range_end is not given, the request returns the key.
   bytes key = 1;
-  // if the range_end is given, it gets the keys in range [key, range_end).
+  // if the range_end is given, it gets the keys in range [key, range_end)
+  // if range_end is nonempty, otherwise it returns all keys >= key.
   bytes range_end = 2;
   // limit the number of keys returned.
   int64 limit = 3;
@@ -116,6 +166,13 @@ message RangeRequest {
 
   // sort_target is the kv field to use for sorting
   SortTarget sort_target = 6;
+
+  // range request is linearizable by default. Linearizable requests has a higher
+  // latency and lower throughput than serializable request.
+  // To reduce latency, serializable can be set. If serializable is set, range request 
+  // will be serializable, but not linearizable with other requests.
+  // Serializable range can be served locally without waiting for other nodes in the cluster.
+  bool serializable = 7;
 }
 
 message RangeResponse {
@@ -144,6 +201,8 @@ message DeleteRangeRequest {
 
 message DeleteRangeResponse {
   ResponseHeader header = 1;
+  // Deleted is the number of keys that got deleted.
+  int64 deleted = 2;
 }
 
 message RequestUnion {
@@ -238,7 +297,8 @@ message HashRequest {
 }
 
 message HashResponse {
-  uint32 hash = 1;
+  ResponseHeader header = 1;
+  uint32 hash = 2;
 }
 
 message WatchRequest {
@@ -251,11 +311,16 @@ message WatchRequest {
 message WatchCreateRequest {
   // the key to be watched
   bytes key = 1;
-  // the prefix to be watched.
-  bytes prefix = 2;
+  // if the range_end is given, keys in [key, range_end) are watched
+  // NOTE: only range_end == prefixEnd(key) is accepted now
+  bytes range_end = 2;
   // start_revision is an optional revision (including) to watch from. No start_revision is "now".
   int64 start_revision = 3;
-  // TODO: support Range watch?
+  // if progress_notify is set, etcd server sends WatchResponse with empty events to the 
+  // created watcher when there are no recent events. It is useful when clients want always to be
+  // able to recover a disconnected watcher from a recent known revision.
+  // etcdsever can decide how long it should send a notification based on current load.
+  bool progress_notify = 4;
 }
 
 message WatchCancelRequest {
@@ -274,14 +339,15 @@ message WatchResponse {
   // If the response is for a cancel watch request, cancel is set to true.
   // No further events will be sent to the canceled watching.
   bool canceled = 4;
-  // If a watching tries to watch at a compacted index, compacted will be set to true.
+  // CompactRevision is set to the minimum index if a watching tries to watch
+  // at a compacted index.
   //
   // This happens when creating a watching at a compacted revision or the watching cannot
   // catch up with the progress of the KV.
   //
   // Client should treat the watching as canceled and should not try to create any
   // watching with same start_revision again.
-  bool compacted = 5;
+  int64 compact_revision  = 5;
 
   repeated storagepb.Event events = 11;
 }
@@ -323,10 +389,11 @@ message Member {
   uint64 ID = 1;
   // If the member is not started, name will be an empty string.
   string name = 2;
-  repeated string peerURLs = 3;
+  bool IsLeader = 3;
+  repeated string peerURLs = 4;
   // If the member is not started, client_URLs will be an zero length
   // string array.
-  repeated string clientURLs = 4;
+  repeated string clientURLs = 5;
 }
 
 message MemberAddRequest {
@@ -361,4 +428,110 @@ message MemberListRequest {
 message MemberListResponse {
   ResponseHeader header = 1;
   repeated Member members = 2;
+}
+
+message DefragmentRequest {
+
+}
+
+message DefragmentResponse {
+  ResponseHeader header = 1;
+}
+
+message AuthEnableRequest {
+}
+
+message AuthDisableRequest {
+}
+
+message AuthenticateRequest {
+}
+
+message UserAddRequest {
+}
+
+message UserGetRequest {
+}
+
+message UserDeleteRequest {
+}
+
+message UserChangePasswordRequest {
+}
+
+message UserGrantRequest {
+}
+
+message UserRevokeRequest {
+}
+
+message RoleAddRequest {
+}
+
+message RoleGetRequest {
+}
+
+message RoleDeleteRequest {
+}
+
+message RoleGrantRequest {
+}
+
+message RoleRevokeRequest {
+}
+
+message AuthEnableResponse {
+  ResponseHeader header = 1;
+}
+
+message AuthDisableResponse {
+  ResponseHeader header = 1;
+}
+
+message AuthenticateResponse {
+  ResponseHeader header = 1;
+}
+
+message UserAddResponse {
+  ResponseHeader header = 1;
+}
+
+message UserGetResponse {
+  ResponseHeader header = 1;
+}
+
+message UserDeleteResponse {
+  ResponseHeader header = 1;
+}
+
+message UserChangePasswordResponse {
+  ResponseHeader header = 1;
+}
+
+message UserGrantResponse {
+  ResponseHeader header = 1;
+}
+
+message UserRevokeResponse {
+  ResponseHeader header = 1;
+}
+
+message RoleAddResponse {
+  ResponseHeader header = 1;
+}
+
+message RoleGetResponse {
+  ResponseHeader header = 1;
+}
+
+message RoleDeleteResponse {
+  ResponseHeader header = 1;
+}
+
+message RoleGrantResponse {
+  ResponseHeader header = 1;
+}
+
+message RoleRevokeResponse {
+  ResponseHeader header = 1;
 }

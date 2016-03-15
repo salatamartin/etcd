@@ -22,7 +22,7 @@ import (
 	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/cheggaaa/pb"
 	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/spf13/cobra"
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
-	"github.com/coreos/etcd/etcdserver/etcdserverpb"
+	v3 "github.com/coreos/etcd/clientv3"
 )
 
 // rangeCmd represents the range command
@@ -34,12 +34,14 @@ var rangeCmd = &cobra.Command{
 }
 
 var (
-	rangeTotal int
+	rangeTotal       int
+	rangeConsistency string
 )
 
 func init() {
 	RootCmd.AddCommand(rangeCmd)
 	rangeCmd.Flags().IntVar(&rangeTotal, "total", 10000, "Total number of range requests")
+	rangeCmd.Flags().StringVar(&rangeConsistency, "consistency", "l", "Linearizable(l) or Serializable(s)")
 }
 
 func rangeFunc(cmd *cobra.Command, args []string) {
@@ -48,14 +50,23 @@ func rangeFunc(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	k := []byte(args[0])
-	var end []byte
-	if len(args) == 1 {
-		end = []byte(args[1])
+	k := args[0]
+	end := ""
+	if len(args) == 2 {
+		end = args[1]
+	}
+
+	if rangeConsistency == "l" {
+		fmt.Println("bench with linearizable range")
+	} else if rangeConsistency == "s" {
+		fmt.Println("bench with serializable range")
+	} else {
+		fmt.Fprintln(os.Stderr, cmd.Usage())
+		os.Exit(1)
 	}
 
 	results = make(chan result)
-	requests := make(chan etcdserverpb.RangeRequest, totalClients)
+	requests := make(chan v3.Op, totalClients)
 	bar = pb.New(rangeTotal)
 
 	clients := mustCreateClients(totalClients, totalConns)
@@ -72,9 +83,12 @@ func rangeFunc(cmd *cobra.Command, args []string) {
 
 	go func() {
 		for i := 0; i < rangeTotal; i++ {
-			requests <- etcdserverpb.RangeRequest{
-				Key:      k,
-				RangeEnd: end}
+			opts := []v3.OpOption{v3.WithRange(end)}
+			if rangeConsistency == "s" {
+				opts = append(opts, v3.WithSerializable())
+			}
+			op := v3.OpGet(k, opts...)
+			requests <- op
 		}
 		close(requests)
 	}()
@@ -87,12 +101,12 @@ func rangeFunc(cmd *cobra.Command, args []string) {
 	<-pdoneC
 }
 
-func doRange(client etcdserverpb.KVClient, requests <-chan etcdserverpb.RangeRequest) {
+func doRange(client v3.KV, requests <-chan v3.Op) {
 	defer wg.Done()
 
-	for req := range requests {
+	for op := range requests {
 		st := time.Now()
-		_, err := client.Range(context.Background(), &req)
+		_, err := client.Do(context.Background(), op)
 
 		var errStr string
 		if err != nil {

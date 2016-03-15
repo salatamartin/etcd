@@ -168,7 +168,7 @@ func TestApplyRepeat(t *testing.T) {
 		r: raftNode{
 			Node:        n,
 			raftStorage: raft.NewMemoryStorage(),
-			storage:     &storageRecorder{},
+			storage:     newStorageRecorder(""),
 			transport:   rafthttp.NewNopTransporter(),
 		},
 		cfg:      &ServerConfig{},
@@ -229,7 +229,7 @@ func TestApplyRequest(t *testing.T) {
 			[]testutil.Action{
 				{
 					Name:   "Create",
-					Params: []interface{}{"", false, "", true, time.Time{}},
+					Params: []interface{}{"", false, "", true, store.TTLOptionSet{ExpireTime: time.Time{}}},
 				},
 			},
 		},
@@ -240,7 +240,7 @@ func TestApplyRequest(t *testing.T) {
 			[]testutil.Action{
 				{
 					Name:   "Create",
-					Params: []interface{}{"", false, "", true, time.Unix(0, 1337)},
+					Params: []interface{}{"", false, "", true, store.TTLOptionSet{ExpireTime: time.Unix(0, 1337)}},
 				},
 			},
 		},
@@ -251,7 +251,7 @@ func TestApplyRequest(t *testing.T) {
 			[]testutil.Action{
 				{
 					Name:   "Create",
-					Params: []interface{}{"", true, "", true, time.Time{}},
+					Params: []interface{}{"", true, "", true, store.TTLOptionSet{ExpireTime: time.Time{}}},
 				},
 			},
 		},
@@ -262,7 +262,7 @@ func TestApplyRequest(t *testing.T) {
 			[]testutil.Action{
 				{
 					Name:   "Set",
-					Params: []interface{}{"", false, "", time.Time{}},
+					Params: []interface{}{"", false, "", store.TTLOptionSet{ExpireTime: time.Time{}}},
 				},
 			},
 		},
@@ -273,7 +273,7 @@ func TestApplyRequest(t *testing.T) {
 			[]testutil.Action{
 				{
 					Name:   "Set",
-					Params: []interface{}{"", true, "", time.Time{}},
+					Params: []interface{}{"", true, "", store.TTLOptionSet{ExpireTime: time.Time{}}},
 				},
 			},
 		},
@@ -284,7 +284,7 @@ func TestApplyRequest(t *testing.T) {
 			[]testutil.Action{
 				{
 					Name:   "Update",
-					Params: []interface{}{"", "", time.Time{}},
+					Params: []interface{}{"", "", store.TTLOptionSet{ExpireTime: time.Time{}}},
 				},
 			},
 		},
@@ -295,7 +295,7 @@ func TestApplyRequest(t *testing.T) {
 			[]testutil.Action{
 				{
 					Name:   "Create",
-					Params: []interface{}{"", false, "", false, time.Time{}},
+					Params: []interface{}{"", false, "", false, store.TTLOptionSet{ExpireTime: time.Time{}}},
 				},
 			},
 		},
@@ -306,7 +306,7 @@ func TestApplyRequest(t *testing.T) {
 			[]testutil.Action{
 				{
 					Name:   "CompareAndSwap",
-					Params: []interface{}{"", "", uint64(1), "", time.Time{}},
+					Params: []interface{}{"", "", uint64(1), "", store.TTLOptionSet{ExpireTime: time.Time{}}},
 				},
 			},
 		},
@@ -317,7 +317,7 @@ func TestApplyRequest(t *testing.T) {
 			[]testutil.Action{
 				{
 					Name:   "Create",
-					Params: []interface{}{"", false, "", false, time.Time{}},
+					Params: []interface{}{"", false, "", false, store.TTLOptionSet{ExpireTime: time.Time{}}},
 				},
 			},
 		},
@@ -328,7 +328,7 @@ func TestApplyRequest(t *testing.T) {
 			[]testutil.Action{
 				{
 					Name:   "CompareAndSwap",
-					Params: []interface{}{"", "", uint64(1), "", time.Time{}},
+					Params: []interface{}{"", "", uint64(1), "", store.TTLOptionSet{ExpireTime: time.Time{}}},
 				},
 			},
 		},
@@ -339,7 +339,7 @@ func TestApplyRequest(t *testing.T) {
 			[]testutil.Action{
 				{
 					Name:   "CompareAndSwap",
-					Params: []interface{}{"", "bar", uint64(0), "", time.Time{}},
+					Params: []interface{}{"", "bar", uint64(0), "", store.TTLOptionSet{ExpireTime: time.Time{}}},
 				},
 			},
 		},
@@ -350,7 +350,7 @@ func TestApplyRequest(t *testing.T) {
 			[]testutil.Action{
 				{
 					Name:   "CompareAndSwap",
-					Params: []interface{}{"", "bar", uint64(1), "", time.Time{}},
+					Params: []interface{}{"", "bar", uint64(1), "", store.TTLOptionSet{ExpireTime: time.Time{}}},
 				},
 			},
 		},
@@ -625,7 +625,7 @@ func TestDoProposal(t *testing.T) {
 			cfg: &ServerConfig{TickMs: 1},
 			r: raftNode{
 				Node:        newNodeCommitter(),
-				storage:     &storageRecorder{},
+				storage:     newStorageRecorder(""),
 				raftStorage: raft.NewMemoryStorage(),
 				transport:   rafthttp.NewNopTransporter(),
 			},
@@ -776,7 +776,7 @@ func TestSyncTrigger(t *testing.T) {
 			Node:        n,
 			raftStorage: raft.NewMemoryStorage(),
 			transport:   rafthttp.NewNopTransporter(),
-			storage:     &storageRecorder{},
+			storage:     newStorageRecorder(""),
 		},
 		store:      store.NewNop(),
 		SyncTicker: st,
@@ -822,7 +822,7 @@ func TestSnapshot(t *testing.T) {
 	s := raft.NewMemoryStorage()
 	s.Append([]raftpb.Entry{{Index: 1}})
 	st := store.NewRecorder()
-	p := &storageRecorder{}
+	p := newStorageRecorder("")
 	srv := &EtcdServer{
 		cfg: &ServerConfig{},
 		r: raftNode{
@@ -856,7 +856,7 @@ func TestSnapshot(t *testing.T) {
 func TestTriggerSnap(t *testing.T) {
 	snapc := 10
 	st := store.NewRecorder()
-	p := &storageRecorder{}
+	p := newStorageRecorderStream("")
 	srv := &EtcdServer{
 		cfg:       &ServerConfig{TickMs: 1},
 		snapCount: uint64(snapc),
@@ -870,23 +870,29 @@ func TestTriggerSnap(t *testing.T) {
 		reqIDGen: idutil.NewGenerator(0, time.Time{}),
 	}
 	srv.start()
+
+	donec := make(chan struct{})
+	go func() {
+		wcnt := 2 + snapc
+		gaction, _ := p.Wait(wcnt)
+
+		// each operation is recorded as a Save
+		// (SnapCount+1) * Puts + SaveSnap = (SnapCount+1) * Save + SaveSnap
+		if len(gaction) != wcnt {
+			t.Fatalf("len(action) = %d, want %d", len(gaction), wcnt)
+		}
+		if !reflect.DeepEqual(gaction[wcnt-1], testutil.Action{Name: "SaveSnap"}) {
+			t.Errorf("action = %s, want SaveSnap", gaction[wcnt-1])
+		}
+		close(donec)
+	}()
+
 	for i := 0; i < snapc+1; i++ {
 		srv.Do(context.Background(), pb.Request{Method: "PUT"})
 	}
 
-	wcnt := 2 + snapc
-	gaction, _ := p.Wait(wcnt)
-
 	srv.Stop()
-
-	// each operation is recorded as a Save
-	// (SnapCount+1) * Puts + SaveSnap = (SnapCount+1) * Save + SaveSnap
-	if len(gaction) != wcnt {
-		t.Fatalf("len(action) = %d, want %d", len(gaction), wcnt)
-	}
-	if !reflect.DeepEqual(gaction[wcnt-1], testutil.Action{Name: "SaveSnap"}) {
-		t.Errorf("action = %s, want SaveSnap", gaction[wcnt-1])
-	}
+	<-donec
 }
 
 // TestConcurrentApplyAndSnapshotV3 will send out snapshots concurrently with
@@ -919,7 +925,7 @@ func TestConcurrentApplyAndSnapshotV3(t *testing.T) {
 		r: raftNode{
 			Node:        n,
 			transport:   tr,
-			storage:     &storageRecorder{dbPath: testdir},
+			storage:     newStorageRecorder(testdir),
 			raftStorage: rs,
 		},
 		store:    cl.store,
@@ -991,7 +997,7 @@ func TestConcurrentApplyAndSnapshotV3(t *testing.T) {
 func TestRecvSnapshot(t *testing.T) {
 	n := newNopReadyNode()
 	st := store.NewRecorder()
-	p := &storageRecorder{}
+	p := newStorageRecorder("")
 	cl := newCluster("abc")
 	cl.SetStore(store.New())
 	s := &EtcdServer{
@@ -1038,7 +1044,7 @@ func TestApplySnapshotAndCommittedEntries(t *testing.T) {
 		cfg: &ServerConfig{},
 		r: raftNode{
 			Node:        n,
-			storage:     &storageRecorder{},
+			storage:     newStorageRecorder(""),
 			raftStorage: storage,
 			transport:   rafthttp.NewNopTransporter(),
 		},
@@ -1082,7 +1088,7 @@ func TestAddMember(t *testing.T) {
 		r: raftNode{
 			Node:        n,
 			raftStorage: raft.NewMemoryStorage(),
-			storage:     &storageRecorder{},
+			storage:     newStorageRecorder(""),
 			transport:   rafthttp.NewNopTransporter(),
 		},
 		cfg:      &ServerConfig{},
@@ -1122,7 +1128,7 @@ func TestRemoveMember(t *testing.T) {
 		r: raftNode{
 			Node:        n,
 			raftStorage: raft.NewMemoryStorage(),
-			storage:     &storageRecorder{},
+			storage:     newStorageRecorder(""),
 			transport:   rafthttp.NewNopTransporter(),
 		},
 		cfg:      &ServerConfig{},
@@ -1161,7 +1167,7 @@ func TestUpdateMember(t *testing.T) {
 		r: raftNode{
 			Node:        n,
 			raftStorage: raft.NewMemoryStorage(),
-			storage:     &storageRecorder{},
+			storage:     newStorageRecorder(""),
 			transport:   rafthttp.NewNopTransporter(),
 		},
 		store:    st,

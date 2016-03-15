@@ -17,7 +17,6 @@ package recipe
 import (
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	"github.com/coreos/etcd/clientv3"
-	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/storage/storagepb"
 )
 
@@ -25,13 +24,20 @@ import (
 // blocks again on Leave until all processes have left.
 type DoubleBarrier struct {
 	client *clientv3.Client
-	key    string // key for the collective barrier
-	count  int
-	myKey  *EphemeralKV // current key for this process on the barrier
+	ctx    context.Context
+
+	key   string // key for the collective barrier
+	count int
+	myKey *EphemeralKV // current key for this process on the barrier
 }
 
 func NewDoubleBarrier(client *clientv3.Client, key string, count int) *DoubleBarrier {
-	return &DoubleBarrier{client, key, count, nil}
+	return &DoubleBarrier{
+		client: client,
+		ctx:    context.TODO(),
+		key:    key,
+		count:  count,
+	}
 }
 
 // Enter waits for "count" processes to enter the barrier then returns
@@ -42,7 +48,7 @@ func (b *DoubleBarrier) Enter() error {
 	}
 	b.myKey = ek
 
-	resp, err := NewRange(b.client, b.key+"/waiters").Prefix()
+	resp, err := b.client.Get(b.ctx, b.key+"/waiters", clientv3.WithPrefix())
 	if err != nil {
 		return err
 	}
@@ -53,21 +59,24 @@ func (b *DoubleBarrier) Enter() error {
 
 	if len(resp.Kvs) == b.count {
 		// unblock waiters
-		_, err = putEmptyKey(b.client.KV, b.key+"/ready")
+		_, err = b.client.Put(b.ctx, b.key+"/ready", "")
 		return err
 	}
 
 	_, err = WaitEvents(
 		b.client,
 		b.key+"/ready",
-		resp.Header.Revision,
+		ek.Revision(),
 		[]storagepb.Event_EventType{storagepb.PUT})
 	return err
 }
 
 // Leave waits for "count" processes to leave the barrier then returns
 func (b *DoubleBarrier) Leave() error {
-	resp, err := NewRange(b.client, b.key+"/waiters").Prefix()
+	resp, err := b.client.Get(b.ctx, b.key+"/waiters", clientv3.WithPrefix())
+	if err != nil {
+		return err
+	}
 	if len(resp.Kvs) == 0 {
 		return nil
 	}
@@ -85,8 +94,7 @@ func (b *DoubleBarrier) Leave() error {
 
 	if len(resp.Kvs) == 1 {
 		// this is the only node in the barrier; finish up
-		req := &pb.DeleteRangeRequest{Key: []byte(b.key + "/ready")}
-		if _, err = b.client.KV.DeleteRange(context.TODO(), req); err != nil {
+		if _, err = b.client.Delete(b.ctx, b.key+"/ready"); err != nil {
 			return err
 		}
 		return b.myKey.Delete()
@@ -100,7 +108,7 @@ func (b *DoubleBarrier) Leave() error {
 		_, err = WaitEvents(
 			b.client,
 			string(highest.Key),
-			resp.Header.Revision,
+			highest.ModRevision,
 			[]storagepb.Event_EventType{storagepb.DELETE})
 		if err != nil {
 			return err
@@ -117,7 +125,7 @@ func (b *DoubleBarrier) Leave() error {
 	_, err = WaitEvents(
 		b.client,
 		key,
-		resp.Header.Revision,
+		lowest.ModRevision,
 		[]storagepb.Event_EventType{storagepb.DELETE})
 	if err != nil {
 		return err

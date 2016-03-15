@@ -125,7 +125,7 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 
 	//write to KVstore to get the Event
 	r := ent.RetrieveMessage()
-	event, err := ls.kvStore.Set(r.Path, r.Dir, r.Val, store.Permanent)
+	event, err := ls.kvStore.Set(r.Path, r.Dir, r.Val, store.TTLOptionSet{ExpireTime: store.Permanent})
 	if err != nil {
 		plog.Infof("Could not write entry to local KV store")
 		return nil, err

@@ -25,6 +25,7 @@ import (
 
 	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
+	"github.com/coreos/etcd/pkg/contention"
 	"github.com/coreos/etcd/pkg/pbutil"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/raft"
@@ -117,6 +118,8 @@ type raftNode struct {
 	// If transport is nil, server will panic.
 	transport rafthttp.Transporter
 
+	td *contention.TimeoutDetector
+
 	stopped chan struct{}
 	done    chan struct{}
 }
@@ -130,10 +133,19 @@ func (r *raftNode) start(s *EtcdServer) {
 	r.stopped = make(chan struct{})
 	r.done = make(chan struct{})
 
+	heartbeat := 200 * time.Millisecond
+	if s.cfg != nil {
+		heartbeat = time.Duration(s.cfg.TickMs) * time.Millisecond
+	}
+	// set up contention detectors for raft heartbeat message.
+	// expect to send a heartbeat within 2 heartbeat intervals.
+	r.td = contention.NewTimeoutDetector(2 * heartbeat)
+
 	go func() {
 		var syncC <-chan time.Time
 
 		defer r.onStop()
+		islead := false
 
 		for {
 			select {
@@ -148,6 +160,7 @@ func (r *raftNode) start(s *EtcdServer) {
 					}
 					atomic.StoreUint64(&r.lead, rd.SoftState.Lead)
 					if rd.RaftState == raft.StateLeader {
+						islead = true
 						// TODO: raft should send server a notification through chan when
 						// it promotes or demotes instead of modifying server directly.
 						syncC = r.s.SyncTicker
@@ -159,9 +172,17 @@ func (r *raftNode) start(s *EtcdServer) {
 						if r.s.stats != nil {
 							r.s.stats.BecomeLeader()
 						}
+						if r.s.compactor != nil {
+							r.s.compactor.Resume()
+						}
+						r.td.Reset()
 					} else {
+						islead = false
 						if r.s.lessor != nil {
 							r.s.lessor.Demote()
+						}
+						if r.s.compactor != nil {
+							r.s.compactor.Pause()
 						}
 						syncC = nil
 					}
@@ -180,6 +201,13 @@ func (r *raftNode) start(s *EtcdServer) {
 					return
 				}
 
+				// the leader can write to its disk in parallel with replicating to the followers and them
+				// writing to their disks.
+				// For more details, check raft thesis 10.2.1
+				if islead {
+					r.s.send(rd.Messages)
+				}
+
 				if !raftpb.IsEmptySnap(rd.Snapshot) {
 					if err := r.storage.SaveSnap(rd.Snapshot); err != nil {
 						plog.Fatalf("raft save snapshot error: %v", err)
@@ -192,7 +220,9 @@ func (r *raftNode) start(s *EtcdServer) {
 				}
 				r.raftStorage.Append(rd.Entries)
 
-				r.s.send(rd.Messages)
+				if !islead {
+					r.s.send(rd.Messages)
+				}
 				raftDone <- struct{}{}
 				r.Advance()
 			case <-syncC:
@@ -325,10 +355,8 @@ func restartNode(cfg *ServerConfig, snapshot *raftpb.Snapshot) (types.ID, *clust
 		LocalWal:        lw,
 		MaybeEnts:       lents,
 	}
-	plog.Infof("restarting member %s in cluster %s at commit index %d, appended snapshots", id, cid, st.Commit)
 	n := raft.RestartNode(c)
 	raftStatusMu.Lock()
-	plog.Infof("restarting member %s in cluster %s at commit index %d, acquired lock", id, cid, st.Commit)
 	raftStatus = n.Status
 	raftStatusMu.Unlock()
 	advanceTicksForElection(n, c.ElectionTick)

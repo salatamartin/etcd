@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// TODO: support arm64
+// +build amd64
+
 package etcdmain
 
 import (
@@ -274,27 +277,28 @@ func startEtcd(cfg *config) (<-chan struct{}, error) {
 	}
 
 	srvcfg := &etcdserver.ServerConfig{
-		Name:                 cfg.name,
-		ClientURLs:           cfg.acurls,
-		PeerURLs:             cfg.apurls,
-		DataDir:              cfg.dir,
-		DedicatedWALDir:      cfg.walDir,
-		DedicatedLocalWALDir: cfg.localWalDir,
-		SnapCount:            cfg.snapCount,
-		MaxSnapFiles:         cfg.maxSnapFiles,
-		MaxWALFiles:          cfg.maxWalFiles,
-		InitialPeerURLsMap:   urlsmap,
-		InitialClusterToken:  token,
-		DiscoveryURL:         cfg.durl,
-		DiscoveryProxy:       cfg.dproxy,
-		NewCluster:           cfg.isNewCluster(),
-		ForceNewCluster:      cfg.forceNewCluster,
-		PeerTLSInfo:          cfg.peerTLSInfo,
-		TickMs:               cfg.TickMs,
-		ElectionTicks:        cfg.electionTicks(),
-		V3demo:               cfg.v3demo,
-		StrictReconfigCheck:  cfg.strictReconfigCheck,
-		EnablePprof:          cfg.enablePprof,
+		Name:                    cfg.name,
+		ClientURLs:              cfg.acurls,
+		PeerURLs:                cfg.apurls,
+		DataDir:                 cfg.dir,
+		DedicatedWALDir:         cfg.walDir,
+		DedicatedLocalWALDir:    cfg.localWalDir,
+		SnapCount:               cfg.snapCount,
+		MaxSnapFiles:            cfg.maxSnapFiles,
+		MaxWALFiles:             cfg.maxWalFiles,
+		InitialPeerURLsMap:      urlsmap,
+		InitialClusterToken:     token,
+		DiscoveryURL:            cfg.durl,
+		DiscoveryProxy:          cfg.dproxy,
+		NewCluster:              cfg.isNewCluster(),
+		ForceNewCluster:         cfg.forceNewCluster,
+		PeerTLSInfo:             cfg.peerTLSInfo,
+		TickMs:                  cfg.TickMs,
+		ElectionTicks:           cfg.electionTicks(),
+		V3demo:                  cfg.v3demo,
+		AutoCompactionRetention: cfg.autoCompactionRetention,
+		StrictReconfigCheck:     cfg.strictReconfigCheck,
+		EnablePprof:             cfg.enablePprof,
 	}
 	var s *etcdserver.EtcdServer
 	s, err = etcdserver.NewServer(srvcfg)

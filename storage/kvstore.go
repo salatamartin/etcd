@@ -22,7 +22,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	"github.com/coreos/etcd/lease"
+	"github.com/coreos/etcd/pkg/schedule"
 	"github.com/coreos/etcd/storage/backend"
 	"github.com/coreos/etcd/storage/storagepb"
 )
@@ -62,9 +64,9 @@ type store struct {
 	tx    backend.BatchTx
 	txnID int64 // tracks the current txnID to verify txn operations
 
-	changes []storagepb.KeyValue
+	changes   []storagepb.KeyValue
+	fifoSched schedule.Scheduler
 
-	wg    sync.WaitGroup
 	stopc chan struct{}
 }
 
@@ -79,7 +81,10 @@ func NewStore(b backend.Backend, le lease.Lessor) *store {
 
 		currentRev:     revision{main: 1},
 		compactMainRev: -1,
-		stopc:          make(chan struct{}),
+
+		fifoSched: schedule.NewFIFOScheduler(),
+
+		stopc: make(chan struct{}),
 	}
 
 	if s.le != nil {
@@ -239,8 +244,16 @@ func (s *store) Compact(rev int64) error {
 
 	keep := s.kvindex.Compact(rev)
 
-	s.wg.Add(1)
-	go s.scheduleCompaction(rev, keep)
+	var j = func(ctx context.Context) {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		s.scheduleCompaction(rev, keep)
+	}
+
+	s.fifoSched.Schedule(j)
 
 	indexCompactionPauseDurations.Observe(float64(time.Now().Sub(start) / time.Millisecond))
 	return nil
@@ -258,10 +271,7 @@ func (s *store) Restore(b backend.Backend) error {
 	defer s.mu.Unlock()
 
 	close(s.stopc)
-	// TODO: restore without waiting for compaction routine to finish.
-	// We need a way to notify that the store is finished using the old
-	// backend though.
-	s.wg.Wait()
+	s.fifoSched.Stop()
 
 	s.b = b
 	s.kvindex = newTreeIndex()
@@ -269,6 +279,7 @@ func (s *store) Restore(b backend.Backend) error {
 	s.compactMainRev = -1
 	s.tx = b.BatchTx()
 	s.txnID = -1
+	s.fifoSched = schedule.NewFIFOScheduler()
 	s.stopc = make(chan struct{})
 
 	return s.restore()
@@ -301,8 +312,13 @@ func (s *store) restore() error {
 		// restore index
 		switch {
 		case isTombstone(key):
-			// TODO: De-attach keys from lease if necessary
 			s.kvindex.Tombstone(kv.Key, rev)
+			if lease.LeaseID(kv.Lease) != lease.NoLease {
+				err := s.le.Detach(lease.LeaseID(kv.Lease), []lease.LeaseItem{{Key: string(kv.Key)}})
+				if err != nil && err != lease.ErrLeaseNotFound {
+					log.Fatalf("storage: unexpected Detach error %v", err)
+				}
+			}
 		default:
 			s.kvindex.Restore(kv.Key, revision{kv.CreateRevision, 0}, rev, kv.Version)
 			if lease.LeaseID(kv.Lease) != lease.NoLease {
@@ -340,7 +356,7 @@ func (s *store) restore() error {
 
 func (s *store) Close() error {
 	close(s.stopc)
-	s.wg.Wait()
+	s.fifoSched.Stop()
 	return nil
 }
 
@@ -402,11 +418,21 @@ func (s *store) rangeKeys(key, end []byte, limit, rangeRev int64) (kvs []storage
 func (s *store) put(key, value []byte, leaseID lease.LeaseID) {
 	rev := s.currentRev.main + 1
 	c := rev
+	oldLease := lease.NoLease
 
-	// if the key exists before, use its previous created
-	_, created, ver, err := s.kvindex.Get(key, rev)
+	// if the key exists before, use its previous created and
+	// get its previous leaseID
+	grev, created, ver, err := s.kvindex.Get(key, rev)
 	if err == nil {
 		c = created.main
+		ibytes := newRevBytes()
+		revToBytes(grev, ibytes)
+		_, vs := s.tx.UnsafeRange(keyBucketName, ibytes, nil, 0)
+		var kv storagepb.KeyValue
+		if err = kv.Unmarshal(vs[0]); err != nil {
+			log.Fatalf("storage: cannot unmarshal value: %v", err)
+		}
+		oldLease = lease.LeaseID(kv.Lease)
 	}
 
 	ibytes := newRevBytes()
@@ -432,15 +458,22 @@ func (s *store) put(key, value []byte, leaseID lease.LeaseID) {
 	s.changes = append(s.changes, kv)
 	s.currentRev.sub += 1
 
+	if oldLease != lease.NoLease {
+		if s.le == nil {
+			panic("no lessor to detach lease")
+		}
+
+		err = s.le.Detach(oldLease, []lease.LeaseItem{{Key: string(key)}})
+		if err != nil {
+			panic("unexpected error from lease detach")
+		}
+	}
+
 	if leaseID != lease.NoLease {
 		if s.le == nil {
 			panic("no lessor to attach lease")
 		}
 
-		// TODO: validate the existence of lease before call Attach.
-		// We need to ensure put always successful since we do not want
-		// to handle abortion for txn request. We need to ensure all requests
-		// inside the txn can execute without error before executing them.
 		err = s.le.Attach(leaseID, []lease.LeaseItem{{Key: string(key)}})
 		if err != nil {
 			panic("unexpected error from lease Attach")
@@ -453,19 +486,19 @@ func (s *store) deleteRange(key, end []byte) int64 {
 	if s.currentRev.sub > 0 {
 		rrev += 1
 	}
-	keys, _ := s.kvindex.Range(key, end, rrev)
+	keys, revs := s.kvindex.Range(key, end, rrev)
 
 	if len(keys) == 0 {
 		return 0
 	}
 
-	for _, key := range keys {
-		s.delete(key)
+	for i, key := range keys {
+		s.delete(key, revs[i])
 	}
 	return int64(len(keys))
 }
 
-func (s *store) delete(key []byte) {
+func (s *store) delete(key []byte, rev revision) {
 	mainrev := s.currentRev.main + 1
 
 	ibytes := newRevBytes()
@@ -489,7 +522,21 @@ func (s *store) delete(key []byte) {
 	s.changes = append(s.changes, kv)
 	s.currentRev.sub += 1
 
-	// TODO: De-attach keys from lease if necessary
+	ibytes = newRevBytes()
+	revToBytes(rev, ibytes)
+	_, vs := s.tx.UnsafeRange(keyBucketName, ibytes, nil, 0)
+
+	kv.Reset()
+	if err = kv.Unmarshal(vs[0]); err != nil {
+		log.Fatalf("storage: cannot unmarshal value: %v", err)
+	}
+
+	if lease.LeaseID(kv.Lease) != lease.NoLease {
+		err = s.le.Detach(lease.LeaseID(kv.Lease), []lease.LeaseItem{{Key: string(kv.Key)}})
+		if err != nil {
+			log.Fatalf("storage: cannot detach %v", err)
+		}
+	}
 }
 
 func (s *store) getChanges() []storagepb.KeyValue {

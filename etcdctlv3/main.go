@@ -41,22 +41,31 @@ var (
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&globalFlags.Endpoints, "endpoint", "127.0.0.1:2378", "gRPC endpoint")
+	rootCmd.PersistentFlags().StringSliceVar(&globalFlags.Endpoints, "endpoints", []string{"127.0.0.1:2378", "127.0.0.1:22378", "127.0.0.1:32378"}, "gRPC endpoints")
 
-	rootCmd.PersistentFlags().StringVar(&globalFlags.TLS.CertFile, "cert", "", "identify HTTPS client using this SSL certificate file")
-	rootCmd.PersistentFlags().StringVar(&globalFlags.TLS.KeyFile, "key", "", "identify HTTPS client using this SSL key file")
-	rootCmd.PersistentFlags().StringVar(&globalFlags.TLS.CAFile, "cacert", "", "verify certificates of HTTPS-enabled servers using this CA bundle")
+	rootCmd.PersistentFlags().StringVarP(&globalFlags.OutputFormat, "write-out", "w", "simple", "set the output format (simple, json, protobuf)")
+	rootCmd.PersistentFlags().BoolVar(&globalFlags.IsHex, "hex", false, "print byte strings as hex encoded strings")
+
+	rootCmd.PersistentFlags().StringVar(&globalFlags.TLS.CertFile, "cert", "", "identify secure client using this TLS certificate file")
+	rootCmd.PersistentFlags().StringVar(&globalFlags.TLS.KeyFile, "key", "", "identify secure client using this TLS key file")
+	rootCmd.PersistentFlags().StringVar(&globalFlags.TLS.CAFile, "cacert", "", "verify certificates of TLS-enabled secure servers using this CA bundle")
 
 	rootCmd.AddCommand(
-		command.NewRangeCommand(),
+		command.NewGetCommand(),
 		command.NewPutCommand(),
-		command.NewDeleteRangeCommand(),
+		command.NewDelCommand(),
 		command.NewTxnCommand(),
 		command.NewCompactionCommand(),
+		command.NewDefragCommand(),
 		command.NewWatchCommand(),
 		command.NewVersionCommand(),
 		command.NewLeaseCommand(),
 		command.NewMemberCommand(),
+		command.NewSnapshotCommand(),
+		command.NewMakeMirrorCommand(),
+		command.NewLockCommand(),
+		command.NewAuthCommand(),
+		command.NewElectCommand(),
 	)
 }
 

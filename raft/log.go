@@ -287,13 +287,10 @@ func (l *raftLog) matchTerm(i, term uint64) bool {
 }
 
 func (l *raftLog) maybeCommit(maxIndex, term uint64) bool {
-	//plog.Infof("Currently in raftLog.maybeCommit")
 	if maxIndex > l.committed && l.zeroTermOnErrCompacted(l.term(maxIndex)) == term {
 		l.commitTo(maxIndex)
-		//plog.Infof("Commit successful")
 		return true
 	}
-	//plog.Infof("Commit not successful,maxIndex:%d, l.commited:%d", maxIndex, l.committed)
 	return false
 }
 

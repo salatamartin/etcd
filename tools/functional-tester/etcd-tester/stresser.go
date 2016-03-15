@@ -52,11 +52,12 @@ type stresser struct {
 
 	N int
 
-	mu      sync.Mutex
-	failure int
-	success int
-
+	mu     sync.Mutex
+	wg     *sync.WaitGroup
 	cancel func()
+	conn   *grpc.ClientConn
+
+	success int
 }
 
 func (s *stresser) Stress() error {
@@ -64,29 +65,47 @@ func (s *stresser) Stress() error {
 	if err != nil {
 		return fmt.Errorf("%v (%s)", err, s.Endpoint)
 	}
-	kvc := pb.NewKVClient(conn)
-
+	defer conn.Close()
 	ctx, cancel := context.WithCancel(context.Background())
+
+	wg := &sync.WaitGroup{}
+	wg.Add(s.N)
+
+	s.mu.Lock()
+	s.conn = conn
 	s.cancel = cancel
+	s.wg = wg
+	s.mu.Unlock()
+
+	kvc := pb.NewKVClient(conn)
 
 	for i := 0; i < s.N; i++ {
 		go func(i int) {
+			defer wg.Done()
 			for {
-				putctx, putcancel := context.WithTimeout(ctx, 5*time.Second)
+				// TODO: 10-second is enough timeout to cover leader failure
+				// and immediate leader election. Find out what other cases this
+				// could be timed out.
+				putctx, putcancel := context.WithTimeout(ctx, 10*time.Second)
 				_, err := kvc.Put(putctx, &pb.PutRequest{
 					Key:   []byte(fmt.Sprintf("foo%d", rand.Intn(s.KeySuffixRange))),
 					Value: []byte(randStr(s.KeySize)),
 				})
 				putcancel()
-				if grpc.ErrorDesc(err) == context.Canceled.Error() {
+				if err != nil {
+					if grpc.ErrorDesc(err) == context.DeadlineExceeded.Error() {
+						// This retries when request is triggered at the same time as
+						// leader failure. When we terminate the leader, the request to
+						// that leader cannot be processed, and times out. Also requests
+						// to followers cannot be forwarded to the old leader, so timing out
+						// as well. We want to keep stressing until the cluster elects a
+						// new leader and start processing requests again.
+						continue
+					}
 					return
 				}
 				s.mu.Lock()
-				if err != nil {
-					s.failure++
-				} else {
-					s.success++
-				}
+				s.success++
 				s.mu.Unlock()
 			}
 		}(i)
@@ -97,13 +116,19 @@ func (s *stresser) Stress() error {
 }
 
 func (s *stresser) Cancel() {
-	s.cancel()
+	s.mu.Lock()
+	cancel, conn, wg := s.cancel, s.conn, s.wg
+	s.mu.Unlock()
+	cancel()
+	wg.Wait()
+	conn.Close()
 }
 
-func (s *stresser) Report() (success int, failure int) {
+func (s *stresser) Report() (int, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.success, s.failure
+	// TODO: find a better way to report v3 tests
+	return s.success, -1
 }
 
 type stresserV2 struct {

@@ -34,11 +34,20 @@ To prove out the design of the v3 API the team has also built [a number of examp
     - easy for people to write simple etcd application
 
 
+## Notes
+
+### Request Size Limitation
+
+The max request size is around 1MB. Since etcd replicates requests in a streaming fashion, a very large
+request might block other requests for a long time. The use case for etcd is to store small configuration
+values, so we prevent user from submitting large requests. This also applies to Txn requests. We might loosen
+the size in the future a little bit or make it configurable.
+
 ## Protobuf Defined API
 
-[api protobuf](../../etcdserver/etcdserverpb/rpc.proto)
+[api protobuf][api-protobuf]
 
-[kv protobuf](../../storage/storagepb/kv.proto)
+[kv protobuf][kv-protobuf]
 
 ## Examples
 
@@ -197,3 +206,6 @@ WatchResponse {
     …
     
 ```
+
+[api-protobuf]: https://github.com/coreos/etcd/blob/master/etcdserver/etcdserverpb/rpc.proto
+[kv-protobuf]: https://github.com/coreos/etcd/blob/master/storage/storagepb/kv.proto

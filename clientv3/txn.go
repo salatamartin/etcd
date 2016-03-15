@@ -51,7 +51,8 @@ type Txn interface {
 }
 
 type txn struct {
-	kv *kv
+	kv  *kv
+	ctx context.Context
 
 	mu    sync.Mutex
 	cif   bool
@@ -84,8 +85,8 @@ func (txn *txn) If(cs ...Cmp) Txn {
 
 	txn.cif = true
 
-	for _, cmp := range cs {
-		txn.cmps = append(txn.cmps, (*pb.Compare)(&cmp))
+	for i := range cs {
+		txn.cmps = append(txn.cmps, (*pb.Compare)(&cs[i]))
 	}
 
 	return txn
@@ -138,12 +139,12 @@ func (txn *txn) Commit() (*TxnResponse, error) {
 
 	for {
 		r := &pb.TxnRequest{Compare: txn.cmps, Success: txn.sus, Failure: txn.fas}
-		resp, err := kv.getRemote().Txn(context.TODO(), r)
+		resp, err := kv.getRemote().Txn(txn.ctx, r)
 		if err == nil {
 			return (*TxnResponse)(resp), nil
 		}
 
-		if isRPCError(err) {
+		if isHalted(txn.ctx, err) {
 			return nil, err
 		}
 

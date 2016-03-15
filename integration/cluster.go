@@ -37,6 +37,7 @@ import (
 	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/etcdserver/api/v3rpc"
 	"github.com/coreos/etcd/etcdserver/etcdhttp"
+	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/pkg/testutil"
 	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
@@ -490,10 +491,18 @@ func NewClientV3(m *member) (*clientv3.Client, error) {
 	if m.grpcAddr == "" {
 		return nil, fmt.Errorf("member not configured for grpc")
 	}
+
 	cfg := clientv3.Config{
 		Endpoints:   []string{m.grpcAddr},
 		DialTimeout: 5 * time.Second,
-		TLS:         m.ClientTLSInfo,
+	}
+
+	if m.ClientTLSInfo != nil {
+		tls, err := m.ClientTLSInfo.ClientConfig()
+		if err != nil {
+			return nil, err
+		}
+		cfg.TLS = tls
 	}
 	return clientv3.New(cfg)
 }
@@ -732,4 +741,24 @@ func (c *ClusterV3) RandClient() *clientv3.Client {
 
 func (c *ClusterV3) Client(i int) *clientv3.Client {
 	return c.clients[i]
+}
+
+type grpcAPI struct {
+	// Cluster is the cluster API for the client's connection.
+	Cluster pb.ClusterClient
+	// KV is the keyvalue API for the client's connection.
+	KV pb.KVClient
+	// Lease is the lease API for the client's connection.
+	Lease pb.LeaseClient
+	// Watch is the watch API for the client's connection.
+	Watch pb.WatchClient
+}
+
+func toGRPC(c *clientv3.Client) grpcAPI {
+	return grpcAPI{
+		pb.NewClusterClient(c.ActiveConnection()),
+		pb.NewKVClient(c.ActiveConnection()),
+		pb.NewLeaseClient(c.ActiveConnection()),
+		pb.NewWatchClient(c.ActiveConnection()),
+	}
 }

@@ -16,7 +16,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"math/rand"
 	"net"
 	"strings"
@@ -25,7 +24,8 @@ import (
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	"github.com/coreos/etcd/Godeps/_workspace/src/google.golang.org/grpc"
 
-	clientV2 "github.com/coreos/etcd/client"
+	clientv2 "github.com/coreos/etcd/client"
+	"github.com/coreos/etcd/clientv3"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/tools/functional-tester/etcd-agent/client"
 )
@@ -129,6 +129,9 @@ func (c *cluster) Bootstrap() error {
 		}
 	}
 
+	// TODO: Too intensive stressers can panic etcd member with
+	// 'out of memory' error. Put rate limits in server side.
+	stressN := 100
 	var stressers []Stresser
 	if c.v2Only {
 		for _, u := range clientURLs {
@@ -136,7 +139,7 @@ func (c *cluster) Bootstrap() error {
 				Endpoint:       u,
 				KeySize:        c.stressKeySize,
 				KeySuffixRange: c.stressKeySuffixRange,
-				N:              200,
+				N:              stressN,
 			}
 			go s.Stress()
 			stressers = append(stressers, s)
@@ -147,7 +150,7 @@ func (c *cluster) Bootstrap() error {
 				Endpoint:       u,
 				KeySize:        c.stressKeySize,
 				KeySuffixRange: c.stressKeySuffixRange,
-				N:              200,
+				N:              stressN,
 			}
 			go s.Stress()
 			stressers = append(stressers, s)
@@ -181,6 +184,32 @@ func (c *cluster) WaitHealth() error {
 		time.Sleep(time.Second)
 	}
 	return err
+}
+
+// GetLeader returns the index of leader and error if any.
+func (c *cluster) GetLeader() (int, error) {
+	if c.v2Only {
+		return 0, nil
+	}
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints:   c.GRPCURLs,
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		return 0, err
+	}
+	defer cli.Close()
+	clus := clientv3.NewCluster(cli)
+	mem, err := clus.MemberLeader(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	for i, name := range c.Names {
+		if name == mem.Name {
+			return i, nil
+		}
+	}
+	return 0, fmt.Errorf("no leader found")
 }
 
 func (c *cluster) Report() (success, failure int) {
@@ -225,7 +254,7 @@ func (c *cluster) Status() ClusterStatus {
 		desc := c.agentEndpoints[i]
 		if err != nil {
 			cs.AgentStatuses[desc] = client.Status{State: "unknown"}
-			log.Printf("etcd-tester: failed to get the status of agent [%s]", desc)
+			plog.Printf("failed to get the status of agent [%s]", desc)
 		}
 		cs.AgentStatuses[desc] = s
 	}
@@ -243,6 +272,7 @@ func setHealthKey(us []string) error {
 		kvc := pb.NewKVClient(conn)
 		_, err = kvc.Put(ctx, &pb.PutRequest{Key: []byte("health"), Value: []byte("good")})
 		cancel()
+		conn.Close()
 		if err != nil {
 			return err
 		}
@@ -253,15 +283,15 @@ func setHealthKey(us []string) error {
 // setHealthKeyV2 sets health key on all given urls.
 func setHealthKeyV2(us []string) error {
 	for _, u := range us {
-		cfg := clientV2.Config{
+		cfg := clientv2.Config{
 			Endpoints: []string{u},
 		}
-		c, err := clientV2.New(cfg)
+		c, err := clientv2.New(cfg)
 		if err != nil {
 			return err
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		kapi := clientV2.NewKeysAPI(c)
+		kapi := clientv2.NewKeysAPI(c)
 		_, err = kapi.Set(ctx, "health", "good", nil)
 		cancel()
 		if err != nil {
@@ -269,4 +299,48 @@ func setHealthKeyV2(us []string) error {
 		}
 	}
 	return nil
+}
+
+func (c *cluster) getRevisionHash() (map[string]int64, map[string]int64, error) {
+	revs := make(map[string]int64)
+	hashes := make(map[string]int64)
+	for _, u := range c.GRPCURLs {
+		conn, err := grpc.Dial(u, grpc.WithInsecure(), grpc.WithTimeout(5*time.Second))
+		if err != nil {
+			return nil, nil, err
+		}
+		kvc := pb.NewKVClient(conn)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		resp, err := kvc.Hash(ctx, &pb.HashRequest{})
+		cancel()
+		conn.Close()
+		if err != nil {
+			return nil, nil, err
+		}
+		revs[u] = resp.Header.Revision
+		hashes[u] = int64(resp.Hash)
+	}
+	return revs, hashes, nil
+}
+
+func (c *cluster) compactKV(rev int64) error {
+	var (
+		conn *grpc.ClientConn
+		err  error
+	)
+	for _, u := range c.GRPCURLs {
+		conn, err = grpc.Dial(u, grpc.WithInsecure(), grpc.WithTimeout(5*time.Second))
+		if err != nil {
+			continue
+		}
+		kvc := pb.NewKVClient(conn)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err = kvc.Compact(ctx, &pb.CompactionRequest{Revision: rev})
+		cancel()
+		conn.Close()
+		if err == nil {
+			return nil
+		}
+	}
+	return err
 }
