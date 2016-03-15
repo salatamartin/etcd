@@ -325,8 +325,10 @@ func restartNode(cfg *ServerConfig, snapshot *raftpb.Snapshot) (types.ID, *clust
 		LocalWal:        lw,
 		MaybeEnts:       lents,
 	}
+	plog.Infof("restarting member %s in cluster %s at commit index %d, appended snapshots", id, cid, st.Commit)
 	n := raft.RestartNode(c)
 	raftStatusMu.Lock()
+	plog.Infof("restarting member %s in cluster %s at commit index %d, acquired lock", id, cid, st.Commit)
 	raftStatus = n.Status
 	raftStatusMu.Unlock()
 	advanceTicksForElection(n, c.ElectionTick)

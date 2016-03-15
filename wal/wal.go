@@ -238,7 +238,7 @@ func (w *WAL) ReadAll() (metadata []byte, state raftpb.HardState, ents []raftpb.
 		switch rec.Type {
 		case entryType:
 			e := mustUnmarshalEntry(rec.Data)
-			plog.Infof("wal.ReadAll(%s): len(ents)=%d, e.Index=%d, w.start.Index=%d", w.dir, len(ents), e.Index, w.start.Index)
+			//plog.Infof("wal.ReadAll(%s): len(ents)=%d, e.Index=%d, w.start.Index=%d", w.dir, len(ents), e.Index, w.start.Index)
 			if e.Index > w.start.Index {
 				ents = append(ents[:e.Index-w.start.Index-1], e)
 			}

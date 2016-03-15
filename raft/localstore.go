@@ -145,6 +145,12 @@ func (ls *localStore) Entries() []pb.Entry { return ls.ents }
 func (ls *localStore) WaitingForCommitEntries() []pb.Entry { return ls.waitingForCommit }
 
 func (ls *localStore) Merge(ents []pb.Entry) {
+	if len(ls.ents) == 0 {
+		ls.entsMutex.Lock()
+		defer ls.entsMutex.Unlock()
+		ls.ents = ents
+		return
+	}
 	for _, entryToMerge := range ents {
 		if entryToMerge.Data == nil {
 			continue
@@ -175,7 +181,7 @@ func (ls *localStore) SetContext(ctx context.Context, cancel context.CancelFunc)
 
 func (ls *localStore) TrimWithLastSent() {
 	ls.waitingMutex.Lock()
-	ls.waitingForCommit = append(ls.waitingForCommit, ls.ents[:ls.LastSent()-1]...)
+	ls.waitingForCommit = append(ls.waitingForCommit, ls.ents[:ls.LastSent()]...)
 	ls.waitingMutex.Unlock()
 
 	ls.entsMutex.Lock()

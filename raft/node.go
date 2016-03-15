@@ -192,6 +192,7 @@ func RestartNode(c *Config) Node {
 	n := newNode()
 	n.raft = r
 	go n.run(r)
+	plog.Infof("Successfully started new goroutine for n.run(r)")
 	return &n
 }
 

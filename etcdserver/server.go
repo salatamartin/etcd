@@ -418,8 +418,8 @@ func (s *EtcdServer) Start() {
 	go s.purgeFile()
 	go monitorFileDescriptor(s.done)
 	go s.monitorVersions()
-	go s.monitorLocalStore()
-	go s.logLocalStoreState()
+	//go s.monitorLocalStore()
+	//go s.logLocalStoreState()
 }
 
 // start prepares and starts server in a new goroutine. It is no longer safe to
@@ -1366,7 +1366,7 @@ func (s *EtcdServer) monitorLocalStore() {
 		if s.r.lead != uint64(s.id) {
 			continue
 		}
-		plog.Infof("Starting monitorLocalStore cycle")
+		//plog.Infof("Starting monitorLocalStore cycle")
 		lStore := &s.r.Raft().RaftLog.Localstore
 
 		//wait until localstore is initialised
@@ -1392,14 +1392,14 @@ func (s *EtcdServer) monitorLocalStore() {
 				continue
 			}
 			(*lStore).RemoveFirst(1)
-			//plog.Infof("Successfully committed NQPUT request: %s", toCommit.Print())
+			plog.Infof("Successfully committed NQPUT request: %s", toCommit.Print())
 			response := raftpb.Message{
-				Type:   raftpb.MsgLocalStoreCommited,
-				To:     toCommit.Receiver,
-				From:   uint64(s.ID()),
-				Term:   s.Term(),
-				Index:  s.Index(),
-				Commit: uint64(toCommit.Timestamp),
+				Type:      raftpb.MsgLocalStoreCommited,
+				To:        toCommit.Receiver,
+				From:      uint64(s.ID()),
+				Term:      s.Term(),
+				Index:     s.Index(),
+				Timestamp: toCommit.Timestamp,
 			}
 			s.r.Raft().AddMsgToSend(response)
 		}

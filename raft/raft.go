@@ -218,9 +218,10 @@ func newRaft(c *Config) *raft {
 		panic(err.Error())
 	}
 	raftlog := newLog(c.Storage, c.Logger, c.LocalWal, uint64(len(c.MaybeEnts)))
-
 	if c.MaybeEnts != nil && len(c.MaybeEnts) > 0 {
+		/*TOREMOVE*/ plog.Infof("Merging entries")
 		raftlog.Localstore.Merge(c.MaybeEnts)
+		/*TOREMOVE*/ plog.Infof("Entried merged")
 	}
 
 	hs, cs, err := c.Storage.InitialState()
@@ -676,7 +677,7 @@ func stepLeader(r *raft, m pb.Message) {
 		//plog.Infof("Leader's localStore after merge: %v", m.Entries)
 		return
 	case pb.MsgLocalStoreCommited:
-		plog.Infof("Received my own Local store commieted message")
+		plog.Infof("Received my own Local store commited message")
 		handleMsgLocalStoreCommited(r, m)
 		return
 	}
@@ -760,8 +761,8 @@ func stepLeader(r *raft, m pb.Message) {
 }
 
 func handleMsgLocalStoreCommited(r *raft, m pb.Message) {
-	e := r.RaftLog.Localstore.RemoveFromWaiting(int64(m.Commit))
-	plog.Infof("Received MsgLocalStoreCommited message, with timestamp of committed message %v", time.Unix(0, int64(m.Commit)))
+	e := r.RaftLog.Localstore.RemoveFromWaiting(m.Timestamp)
+	plog.Infof("Received MsgLocalStoreCommited message, with timestamp of committed message %v", m.Timestamp)
 	if e != nil {
 		plog.Infof("Entry %s successfully commited with quorum, removed from peristent storage", e.Print())
 	} else {
