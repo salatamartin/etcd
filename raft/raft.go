@@ -757,7 +757,7 @@ func stepLeader(r *raft, m pb.Message) {
 
 func handleMsgLocalStoreCommited(r *raft, m pb.Message) {
 	e := r.RaftLog.Localstore.RemoveFromWaiting(m.Timestamp)
-	plog.Infof("Received MsgLocalStoreCommited message, with timestamp of committed message %v", m.Timestamp)
+	plog.Infof("Received MsgLocalStoreCommited message, with timestamp of committed message %v", time.Unix(0,m.Timestamp))
 	if e != nil {
 		plog.Infof("Entry %s successfully commited with quorum, removed from peristent storage", e.Print())
 	} else {
