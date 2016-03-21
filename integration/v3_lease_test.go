@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
-	"github.com/coreos/etcd/etcdserver/api/v3rpc"
+	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/pkg/testutil"
 	"github.com/coreos/etcd/storage/storagepb"
@@ -105,7 +105,7 @@ func TestV3LeaseCreateByID(t *testing.T) {
 	lresp, err = toGRPC(clus.RandClient()).Lease.LeaseCreate(
 		context.TODO(),
 		&pb.LeaseCreateRequest{ID: 1, TTL: 1})
-	if err != v3rpc.ErrLeaseExist {
+	if err != rpctypes.ErrLeaseExist {
 		t.Error(err)
 	}
 
@@ -241,8 +241,8 @@ func TestV3PutOnNonExistLease(t *testing.T) {
 	badLeaseID := int64(0x12345678)
 	putr := &pb.PutRequest{Key: []byte("foo"), Value: []byte("bar"), Lease: badLeaseID}
 	_, err := toGRPC(clus.RandClient()).KV.Put(ctx, putr)
-	if err != v3rpc.ErrLeaseNotFound {
-		t.Errorf("err = %v, want %v", err, v3rpc.ErrCompacted)
+	if err != rpctypes.ErrLeaseNotFound {
+		t.Errorf("err = %v, want %v", err, rpctypes.ErrCompacted)
 	}
 }
 
@@ -306,6 +306,65 @@ func TestV3LeaseSwitch(t *testing.T) {
 	}
 }
 
+// TestV3LeaseFailover ensures the old leader drops lease keepalive requests within
+// election timeout after it loses its quorum. And the new leader extends the TTL of
+// the lease to at least TTL + election timeout.
+func TestV3LeaseFailover(t *testing.T) {
+	clus := NewClusterV3(t, &ClusterConfig{Size: 3})
+	defer clus.Terminate(t)
+
+	toIsolate := clus.waitLeader(t, clus.Members)
+
+	lc := toGRPC(clus.Client(toIsolate)).Lease
+
+	// create lease
+	lresp, err := lc.LeaseCreate(context.TODO(), &pb.LeaseCreateRequest{TTL: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lresp.Error != "" {
+		t.Fatal(lresp.Error)
+	}
+
+	// isolate the current leader with its followers.
+	clus.Members[toIsolate].Pause()
+
+	lreq := &pb.LeaseKeepAliveRequest{ID: lresp.ID}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	lac, err := lc.LeaseKeepAlive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lac.CloseSend()
+
+	// send keep alive to old leader until the old leader starts
+	// to drop lease request.
+	var expectedExp time.Time
+	for {
+		if err = lac.Send(lreq); err != nil {
+			break
+		}
+		lkresp, rxerr := lac.Recv()
+		if rxerr != nil {
+			break
+		}
+		expectedExp = time.Now().Add(time.Duration(lkresp.TTL) * time.Second)
+		time.Sleep(time.Duration(lkresp.TTL/2) * time.Second)
+	}
+
+	clus.Members[toIsolate].Resume()
+	clus.waitLeader(t, clus.Members)
+
+	// lease should not expire at the last received expire deadline.
+	time.Sleep(expectedExp.Sub(time.Now()) - 500*time.Millisecond)
+
+	if !leaseExist(t, clus, lresp.ID) {
+		t.Error("unexpected lease not exists")
+	}
+}
+
 // acquireLeaseAndKey creates a new lease and creates an attached key.
 func acquireLeaseAndKey(clus *ClusterV3, key string) (int64, error) {
 	// create lease
@@ -364,7 +423,7 @@ func leaseExist(t *testing.T, clus *ClusterV3, leaseID int64) bool {
 		return false
 	}
 
-	if err == v3rpc.ErrLeaseExist {
+	if err == rpctypes.ErrLeaseExist {
 		return true
 	}
 	t.Fatalf("unexpecter error %v", err)

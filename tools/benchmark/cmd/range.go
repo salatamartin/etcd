@@ -112,7 +112,7 @@ func doRange(client v3.KV, requests <-chan v3.Op) {
 		if err != nil {
 			errStr = err.Error()
 		}
-		results <- result{errStr: errStr, duration: time.Since(st)}
+		results <- result{errStr: errStr, duration: time.Since(st), happened: time.Now()}
 		bar.Increment()
 	}
 }

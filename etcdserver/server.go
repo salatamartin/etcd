@@ -430,7 +430,7 @@ func (s *EtcdServer) Start() {
 	go s.purgeFile()
 	go monitorFileDescriptor(s.done)
 	go s.monitorVersions()
-	//go s.monitorLocalStore()
+	go s.monitorLocalStore()
 	//go s.logLocalStoreState()
 }
 

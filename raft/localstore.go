@@ -281,5 +281,5 @@ func (ls *localStore) resetLocalWal() {
 	}
 	ls.wal = newWal
 	ls.lastInWal = 0
-	plog.Infof("SUccessfully removed all entries from persistent storage")
+	plog.Infof("Successfully removed all entries from persistent storage")
 }

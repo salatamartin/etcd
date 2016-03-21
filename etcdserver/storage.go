@@ -15,14 +15,12 @@
 package etcdserver
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"path"
 
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/pkg/pbutil"
-	"github.com/coreos/etcd/pkg/testutil"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/snap"
@@ -146,39 +144,3 @@ func makeMemberDir(dir string) error {
 	}
 	return nil
 }
-
-type storageRecorder struct {
-	testutil.Recorder
-	dbPath string // must have '/' suffix if set
-}
-
-func newStorageRecorder(db string) *storageRecorder {
-	return &storageRecorder{&testutil.RecorderBuffered{}, db}
-}
-
-func newStorageRecorderStream(db string) *storageRecorder {
-	return &storageRecorder{testutil.NewRecorderStream(), db}
-}
-
-func (p *storageRecorder) Save(st raftpb.HardState, ents []raftpb.Entry) error {
-	p.Record(testutil.Action{Name: "Save"})
-	return nil
-}
-
-func (p *storageRecorder) SaveSnap(st raftpb.Snapshot) error {
-	if !raftpb.IsEmptySnap(st) {
-		p.Record(testutil.Action{Name: "SaveSnap"})
-	}
-	return nil
-}
-
-func (p *storageRecorder) DBFilePath(id uint64) (string, error) {
-	p.Record(testutil.Action{Name: "DBFilePath"})
-	path := p.dbPath
-	if path != "" {
-		path = path + "/"
-	}
-	return fmt.Sprintf("%s%016x.snap.db", path, id), nil
-}
-
-func (p *storageRecorder) Close() error { return nil }

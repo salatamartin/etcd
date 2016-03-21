@@ -165,7 +165,7 @@ func (r *raftNode) start(s *EtcdServer) {
 						// it promotes or demotes instead of modifying server directly.
 						syncC = r.s.SyncTicker
 						if r.s.lessor != nil {
-							r.s.lessor.Promote()
+							r.s.lessor.Promote(r.s.cfg.electionTimeout())
 						}
 						// TODO: remove the nil checking
 						// current test utility does not provide the stats
@@ -318,6 +318,11 @@ func startNode(cfg *ServerConfig, cl *cluster, ids []types.ID) (id types.ID, n r
 		MaxSizePerMsg:   maxSizePerMsg,
 		MaxInflightMsgs: maxInflightMsgs,
 	}
+
+	if cfg.V3demo {
+		c.CheckQuorum = true
+	}
+
 	n = raft.StartNode(c, peers)
 	raftStatusMu.Lock()
 	raftStatus = n.Status
@@ -355,6 +360,11 @@ func restartNode(cfg *ServerConfig, snapshot *raftpb.Snapshot) (types.ID, *clust
 		LocalWal:        lw,
 		MaybeEnts:       lents,
 	}
+
+	if cfg.V3demo {
+		c.CheckQuorum = true
+	}
+
 	n := raft.RestartNode(c)
 	raftStatusMu.Lock()
 	raftStatus = n.Status

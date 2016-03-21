@@ -184,7 +184,7 @@ func doWatch(stream v3.Watcher, requests <-chan string) {
 		if wch == nil {
 			errStr = "could not open watch channel"
 		}
-		results <- result{errStr: errStr, duration: time.Since(st)}
+		results <- result{errStr: errStr, duration: time.Since(st), happened: time.Now()}
 		bar.Increment()
 		go recvWatchChan(wch)
 	}
@@ -204,7 +204,7 @@ func recvWatchChan(wch v3.WatchChan) {
 		}
 
 		st := time.Now()
-		results <- result{duration: time.Since(st)}
+		results <- result{duration: time.Since(st), happened: time.Now()}
 		bar.Increment()
 
 		atomic.AddInt32(&nrRecvCompleted, 1)
