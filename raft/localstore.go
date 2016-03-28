@@ -62,6 +62,10 @@ type LocalStore interface {
 	RemoveFromWaiting(timestamp int64) *pb.Entry
 
 	KVStore() store.Store
+
+	ResetWaitingList()
+
+	RemoveWaitingList()
 }
 
 type localStore struct {
@@ -282,4 +286,18 @@ func (ls *localStore) resetLocalWal() {
 	ls.wal = newWal
 	ls.lastInWal = 0
 	plog.Infof("Successfully removed all entries from persistent storage")
+}
+
+func (ls *localStore) ResetWaitingList() {
+	ls.entsMutex.Lock()
+	defer ls.entsMutex.Unlock()
+	ls.waitingMutex.Lock()
+	defer ls.waitingMutex.Unlock()
+	ls.ents = append(ls.ents, ls.waitingForCommit...)
+}
+
+func (ls *localStore) RemoveWaitingList() {
+	ls.waitingMutex.Lock()
+	defer ls.waitingMutex.Unlock()
+	ls.waitingForCommit = []pb.Entry{}
 }

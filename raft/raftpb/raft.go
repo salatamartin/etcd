@@ -55,3 +55,12 @@ func IsEmptyHardState(st HardState) bool {
 func IsEmptySnap(sp Snapshot) bool {
 	return sp.Metadata.Index == 0
 }
+
+func CreateMessage(r ...serverpb.Request) Message {
+	var ents []Entry
+	for index, req := range r {
+		reqData, _ := req.Marshal()
+		ents[index] = Entry{Data: reqData}
+	}
+	return Message{Entries: ents}
+}

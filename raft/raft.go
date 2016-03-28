@@ -506,6 +506,12 @@ func (r *raft) becomeFollower(term uint64, lead uint64) {
 	r.lead = lead
 	r.state = StateFollower
 	r.logger.Infof("%x became follower at term %d", r.id, r.Term)
+	go func() {
+		if len(r.RaftLog.Localstore.WaitingForCommitEntries()) == 0 {
+			return
+		}
+		r.RaftLog.Localstore.RemoveWaitingList()
+	}()
 }
 
 func (r *raft) becomeCandidate() {
@@ -545,8 +551,15 @@ func (r *raft) becomeLeader() {
 		}
 		r.pendingConf = true
 	}
+	go func() {
+		if len(r.RaftLog.Localstore.WaitingForCommitEntries()) == 0 {
+			return
+		}
+		r.RaftLog.Localstore.ResetWaitingList()
+	}()
 	r.appendEntry(pb.Entry{Data: nil})
 	r.logger.Infof("%x became leader at term %d", r.id, r.Term)
+
 }
 
 func (r *raft) campaign() {
