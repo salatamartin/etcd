@@ -66,6 +66,10 @@ type LocalStore interface {
 	ResetWaitingList()
 
 	RemoveWaitingList()
+
+	EntriesFilled() chan struct{}
+
+	WaitingForCommitFilled() chan struct{}
 }
 
 type localStore struct {
@@ -82,6 +86,8 @@ type localStore struct {
 	context           context.Context
 	cancel            context.CancelFunc
 	kvStore           store.Store
+	entriesFilled	  chan struct{}
+	waitingFilled	  chan struct{}
 }
 
 func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) *localStore {
@@ -95,6 +101,8 @@ func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) *localStore {
 		walMutex:         sync.Mutex{},
 		lastInWal:        wSize,
 		kvStore:          store.New(ClusterPrefix, KeysPrefix),
+		entriesFilled: 	  make(chan struct{}),
+		waitingFilled:	  make(chan struct{}),
 	}
 }
 
@@ -119,6 +127,13 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 		}
 	}
 	ls.ents = append(ls.ents, ent)
+	// length was 0 before append, fill channel
+	if len(ls.ents) == 1 {
+		go AddToChan(ls.entriesFilled)
+		/*TOREMOVE*/plog.Infof("entriesFilled + 1")
+	} else {
+		/*TOREMOVE*/plog.Infof("Size of entries: %d", len(ls.ents))
+	}
 	//ls.logger.Infof("Local log after MaybeAdd: %s", FormatEnts(ls.ents))
 	//we have to wait until log is persisted on disk before continuing
 	ls.walMutex.Lock()
@@ -153,6 +168,8 @@ func (ls *localStore) Merge(ents []pb.Entry) {
 		ls.entsMutex.Lock()
 		defer ls.entsMutex.Unlock()
 		ls.ents = ents
+		go AddToChan(ls.entriesFilled)
+		plog.Infof("entriesFilled + 1")
 		return
 	}
 	for _, entryToMerge := range ents {
@@ -184,8 +201,15 @@ func (ls *localStore) SetContext(ctx context.Context, cancel context.CancelFunc)
 }
 
 func (ls *localStore) TrimWithLastSent() {
+	if ls.LastSent() == 0 {
+		return
+	}
 	ls.waitingMutex.Lock()
 	ls.waitingForCommit = append(ls.waitingForCommit, ls.ents[:ls.LastSent()]...)
+	if len(ls.waitingForCommit) == len(ls.ents[:ls.LastSent()]){
+		go AddToChan(ls.waitingFilled)
+		plog.Infof("waitingFilled + 1")
+	}
 	ls.waitingMutex.Unlock()
 
 	ls.entsMutex.Lock()
@@ -300,4 +324,17 @@ func (ls *localStore) RemoveWaitingList() {
 	ls.waitingMutex.Lock()
 	defer ls.waitingMutex.Unlock()
 	ls.waitingForCommit = []pb.Entry{}
+}
+
+func (ls *localStore) EntriesFilled() chan struct{} {
+	return ls.entriesFilled
+}
+
+func (ls *localStore) WaitingForCommitFilled() chan struct{} {
+	return ls.waitingFilled
+}
+
+//should be called in separate goroutine
+func AddToChan(c chan struct{}) {
+	c <- struct{}{}
 }

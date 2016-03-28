@@ -1367,52 +1367,54 @@ func (s *EtcdServer) AuthStore() auth.AuthStore { return s.authStore }
 func (s *EtcdServer) monitorLocalStore() {
 	for {
 		select {
-		case <-time.After(monitorLocalStoreInterval):
 		case <-s.done:
 			return
-		}
+		case <-s.r.Raft().RaftLog.Localstore.EntriesFilled():
 
-		if s.r.lead != uint64(s.id) {
-			continue
-		}
-		//plog.Infof("Starting monitorLocalStore cycle")
-		lStore := &s.r.Raft().RaftLog.Localstore
-
-		//wait until localstore is initialised
-		if lStore == nil {
-			continue
-		}
-
-		//nothing to do if no local entries
-		if len((*lStore).Entries()) == 0 {
-			continue
-		}
-
-		//cycle until lStore is empty
-		ctx, cancel := context.WithCancel(context.Background())
-		for len((*lStore).Entries()) != 0 {
-			toCommit := (*lStore).Entries()[0]
-			message := toCommit.RetrieveMessage()
-			message.NoQuorumRequest = false
-			message.Blocking = true
-			message.Quorum = true
-			_, err := s.Do(ctx, message)
-			if err != nil {
+			if s.r.lead != uint64(s.id) {
+				<-time.After(monitorLocalStoreInterval)
+				go raft.AddToChan(s.r.Raft().RaftLog.Localstore.EntriesFilled())
 				continue
 			}
-			(*lStore).RemoveFirst(1)
-			plog.Infof("Successfully committed NQPUT request: %s", toCommit.Print())
-			response := raftpb.Message{
-				Type:      raftpb.MsgLocalStoreCommited,
-				To:        toCommit.Receiver,
-				From:      uint64(s.ID()),
-				Term:      s.Term(),
-				Index:     s.Index(),
-				Timestamp: toCommit.Timestamp,
+			//plog.Infof("Starting monitorLocalStore cycle")
+			lStore := &s.r.Raft().RaftLog.Localstore
+
+			//wait until localstore is initialised
+			if lStore == nil {
+				continue
 			}
-			s.r.Raft().AddMsgToSend(response)
+
+			//nothing to do if no local entries
+			if len((*lStore).Entries()) == 0 {
+				continue
+			}
+
+			//cycle until lStore is empty
+			ctx, cancel := context.WithCancel(context.Background())
+			for len((*lStore).Entries()) != 0 {
+				toCommit := (*lStore).Entries()[0]
+				message := toCommit.RetrieveMessage()
+				message.NoQuorumRequest = false
+				message.Blocking = true
+				message.Quorum = true
+				_, err := s.Do(ctx, message)
+				if err != nil {
+					continue
+				}
+				(*lStore).RemoveFirst(1)
+				plog.Infof("Successfully committed NQPUT request: %s", toCommit.Print())
+				response := raftpb.Message{
+					Type:      raftpb.MsgLocalStoreCommited,
+					To:        toCommit.Receiver,
+					From:      uint64(s.ID()),
+					Term:      s.Term(),
+					Index:     s.Index(),
+					Timestamp: toCommit.Timestamp,
+				}
+				s.r.Raft().AddMsgToSend(response)
+			}
+			cancel()
 		}
-		cancel()
 	}
 
 }
