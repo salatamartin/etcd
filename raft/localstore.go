@@ -54,12 +54,16 @@ type LocalStore interface {
 
 	//removes all entries with empty Data attribute
 	//should only be called on leader, when not waiting for MsgLocalStoreResp
-	TruncateEmpty()
+	TruncateEmpty() int
+
+	//removes all entries with empty Data attribute
+	//should only be called on leader, when not waiting for MsgLocalStoreResp
+	TruncateEmptyWaiting() int
 
 	RemoveFirst(count uint64)
 
 	//removes entry with defined timestamp
-	RemoveFromWaiting(timestamp int64) *pb.Entry
+	RemoveFromWaiting(ent pb.Entry) *pb.Entry
 
 	KVStore() store.Store
 
@@ -131,8 +135,6 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 	if len(ls.ents) == 1 {
 		go AddToChan(ls.entriesFilled)
 		/*TOREMOVE*/plog.Infof("entriesFilled + 1")
-	} else {
-		/*TOREMOVE*/plog.Infof("Size of entries: %d", len(ls.ents))
 	}
 	//ls.logger.Infof("Local log after MaybeAdd: %s", FormatEnts(ls.ents))
 	//we have to wait until log is persisted on disk before continuing
@@ -216,18 +218,20 @@ func (ls *localStore) TrimWithLastSent() {
 	if uint64(len(ls.ents)) <= ls.LastSent() {
 		ls.ents = []pb.Entry{}
 	} else {
-		ls.ents = ls.ents[ls.LastSent()-1:]
+		ls.ents = ls.ents[ls.LastSent():]
 	}
 	ls.entsMutex.Unlock()
 
 	ls.SetLastSent(0)
 }
 
-func (ls *localStore) TruncateEmpty() {
+func (ls *localStore) TruncateEmpty() int {
 	ls.entsMutex.Lock()
 	defer ls.entsMutex.Unlock()
+	var count int
 	for index := len(ls.ents) - 1; index >= 0; index-- {
 		if ls.ents[index].Data == nil || len(ls.ents[index].Data) == 0 {
+			count++
 			if index == len(ls.ents)-1 {
 				ls.ents = ls.ents[:index]
 			} else {
@@ -236,6 +240,31 @@ func (ls *localStore) TruncateEmpty() {
 		}
 
 	}
+	if len(ls.ents) == 0 && len(ls.waitingForCommit) == 0 {
+		go ls.resetLocalWal()
+	}
+	return count
+}
+
+func (ls *localStore) TruncateEmptyWaiting() int {
+	ls.waitingMutex.Lock()
+	defer ls.waitingMutex.Unlock()
+	var count int
+	for index := len(ls.waitingForCommit) - 1; index >= 0; index-- {
+		if ls.waitingForCommit[index].Data == nil || len(ls.waitingForCommit[index].Data) == 0 {
+			count++
+			if index == len(ls.waitingForCommit)-1 {
+				ls.waitingForCommit = ls.waitingForCommit[:index]
+			} else {
+				ls.waitingForCommit = append(ls.waitingForCommit[:index], ls.waitingForCommit[index+1:]...)
+			}
+		}
+
+	}
+	if len(ls.ents) == 0 && len(ls.waitingForCommit) == 0 {
+		go ls.resetLocalWal()
+	}
+	return count
 }
 
 func (ls *localStore) RemoveFirst(count uint64) {
@@ -250,18 +279,20 @@ func (ls *localStore) RemoveFirst(count uint64) {
 	}
 }
 
-func (ls *localStore) RemoveFromWaiting(timestamp int64) *pb.Entry {
+func (ls *localStore) RemoveFromWaiting(ent pb.Entry) *pb.Entry {
 	ls.waitingMutex.Lock()
 	defer ls.waitingMutex.Unlock()
 
 	for index, entry := range ls.waitingForCommit {
-		if entry.Timestamp == timestamp {
-			ls.waitingForCommit = append(ls.waitingForCommit[:index], ls.waitingForCommit[index+1:]...)
+		if entry.CompareMessage(ent) && entry.Timestamp == ent.Timestamp{
+			//ls.waitingForCommit = append(ls.waitingForCommit[:index], ls.waitingForCommit[index+1:]...)
+			ls.waitingForCommit[index].Data = nil
 			// if all logs are empty, clear persistent storage (not needed anymore)
-			plog.Infof("Number of NQPUTs: not yet received by leader: %d, not yet committed: %d", len(ls.ents), len(ls.waitingForCommit))
-			if len(ls.ents) == 0 && len(ls.waitingForCommit) == 0 {
-				go ls.resetLocalWal()
-			}
+			//plog.Infof("Entry removed from waitingList")
+			//plog.Infof("Number of NQPUTs: not yet received by leader: %d, not yet committed: %d", len(ls.ents), len(ls.waitingForCommit))
+			//if len(ls.ents) == 0 && len(ls.waitingForCommit) == 0 {
+			//	go ls.resetLocalWal()
+			//}
 
 			//remove entry from KV store
 			go func(entry pb.Entry) {

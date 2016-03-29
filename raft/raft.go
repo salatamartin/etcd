@@ -219,9 +219,7 @@ func newRaft(c *Config) *raft {
 	}
 	raftlog := newLog(c.Storage, c.Logger, c.LocalWal, uint64(len(c.MaybeEnts)))
 	if c.MaybeEnts != nil && len(c.MaybeEnts) > 0 {
-		/*TOREMOVE*/ plog.Infof("Merging entries")
 		raftlog.Localstore.Merge(c.MaybeEnts)
-		/*TOREMOVE*/ plog.Infof("Entried merged")
 	}
 
 	hs, cs, err := c.Storage.InitialState()
@@ -673,7 +671,7 @@ func stepLeader(r *raft, m pb.Message) {
 		go func(m pb.Message) {
 			r.RaftLog.Localstore.Merge(m.Entries)
 			response := pb.Message{
-				Type:      pb.MsgLocalStoreResp,
+				Type:      pb.MsgLocalStoreMergeResp,
 				To:        m.From,
 				Index:     m.Index,
 				Timestamp: m.Timestamp,
@@ -688,6 +686,9 @@ func stepLeader(r *raft, m pb.Message) {
 		plog.Infof("Received my own Local store commited message")
 		handleMsgLocalStoreCommited(r, m)
 		return
+	case pb.MsgLocalStoreCommitedResp:
+		//TODO: remove from waitingForCommit
+		r.RaftLog.Localstore.RemoveFromWaiting(m.Entries[0])
 	}
 
 	// All other message types require a progress for m.From (pr).
@@ -769,13 +770,20 @@ func stepLeader(r *raft, m pb.Message) {
 }
 
 func handleMsgLocalStoreCommited(r *raft, m pb.Message) {
-	e := r.RaftLog.Localstore.RemoveFromWaiting(m.Timestamp)
-	plog.Infof("Received MsgLocalStoreCommited message, with timestamp of committed message %v", time.Unix(0,m.Timestamp))
+	entry := m.Entries[0]
+	e := r.RaftLog.Localstore.RemoveFromWaiting(entry)
+	r.RaftLog.Localstore.TruncateEmptyWaiting()
+	plog.Infof("Received MsgLocalStoreCommited message, with timestamp of committed message %v", time.Unix(0, m.Timestamp))
 	if e != nil {
 		plog.Infof("Entry %s successfully commited with quorum, removed from peristent storage", e.Print())
+
 	} else {
 		plog.Infof("Entry with given timestamp not found!")
 	}
+	m.Type = pb.MsgLocalStoreCommitedResp
+	m.To = m.From
+	m.From = r.id
+	r.send(m)
 }
 
 func stepCandidate(r *raft, m pb.Message) {
@@ -865,7 +873,7 @@ func stepFollower(r *raft, m pb.Message) {
 				r.id, r.RaftLog.lastTerm(), r.RaftLog.lastIndex(), r.Vote, m.From, m.LogTerm, m.Index, r.Term)
 			r.send(pb.Message{To: m.From, Type: pb.MsgVoteResp, Reject: true})
 		}
-	case pb.MsgLocalStoreResp:
+	case pb.MsgLocalStoreMergeResp:
 		if m.Timestamp == r.RaftLog.Localstore.LastTimestampSent() {
 			plog.Infof("Received MsfLocalStoreResp with valid lastTimestampSent (%v), moving log to waitingForCommit", time.Unix(0, m.Timestamp))
 			r.RaftLog.Localstore.TrimWithLastSent()

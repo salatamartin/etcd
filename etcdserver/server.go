@@ -73,6 +73,10 @@ const (
 
 	monitorLocalStoreInterval = 5 * time.Second
 
+	localStoreWaitingListReCommitInterval = 5 * time.Second
+
+	localStoreStatePrintInterval = 100 * time.Second
+
 	databaseFilename = "db"
 	// max number of in-flight snapshot messages etcdserver allows to have
 	// This number is more than enough for most clusters with 5 machines.
@@ -431,6 +435,7 @@ func (s *EtcdServer) Start() {
 	go monitorFileDescriptor(s.done)
 	go s.monitorVersions()
 	go s.monitorLocalStore()
+	go s.monitorLocalWaitingList()
 	//go s.logLocalStoreState()
 }
 
@@ -1376,6 +1381,7 @@ func (s *EtcdServer) monitorLocalStore() {
 				go raft.AddToChan(s.r.Raft().RaftLog.Localstore.EntriesFilled())
 				continue
 			}
+			plog.Infof("Passed leader guard in monitorLocalStore")
 			//plog.Infof("Starting monitorLocalStore cycle")
 			lStore := &s.r.Raft().RaftLog.Localstore
 
@@ -1401,17 +1407,10 @@ func (s *EtcdServer) monitorLocalStore() {
 				if err != nil {
 					continue
 				}
-				(*lStore).RemoveFirst(1)
+				(*lStore).SetLastSent(1)
+				(*lStore).TrimWithLastSent()
 				plog.Infof("Successfully committed NQPUT request: %s", toCommit.Print())
-				response := raftpb.Message{
-					Type:      raftpb.MsgLocalStoreCommited,
-					To:        toCommit.Receiver,
-					From:      uint64(s.ID()),
-					Term:      s.Term(),
-					Index:     s.Index(),
-					Timestamp: toCommit.Timestamp,
-				}
-				s.r.Raft().AddMsgToSend(response)
+
 			}
 			cancel()
 		}
@@ -1419,10 +1418,58 @@ func (s *EtcdServer) monitorLocalStore() {
 
 }
 
+func (s *EtcdServer) monitorLocalWaitingList() {
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-s.r.Raft().RaftLog.Localstore.WaitingForCommitFilled():
+		//case <-time.After(monitorLocalStoreInterval):
+
+			if s.r.lead != uint64(s.id) {
+				//<-time.After(monitorLocalStoreInterval)
+				go raft.AddToChan(s.r.Raft().RaftLog.Localstore.WaitingForCommitFilled())
+				continue
+			}
+			lStore := &s.r.Raft().RaftLog.Localstore
+
+			if len((*lStore).Entries()) == 0 && len((*lStore).WaitingForCommitEntries()) == 0 {
+				continue
+			}
+
+			for i := 0; i < len((*lStore).WaitingForCommitEntries()); i++ {
+				toAck := (*lStore).WaitingForCommitEntries()[i]
+				if toAck.Data == nil {
+					continue
+				}
+				response := raftpb.Message{
+					Type:      raftpb.MsgLocalStoreCommited,
+					To:        toAck.Receiver,
+					From:      uint64(s.ID()),
+					Term:      s.Term(),
+					Index:     s.Index(),
+					Timestamp: toAck.Timestamp,
+					Entries:   []raftpb.Entry{toAck},
+				}
+				s.r.Raft().AddMsgToSend(response)
+				plog.Infof("Successfully sent ACK to follower: %s", toAck.Print())
+				//<-time.After(4*time.Second)
+			}
+
+			(*lStore).TruncateEmptyWaiting()
+			if len((*lStore).WaitingForCommitEntries()) != 0 {
+				go raft.AddToChan(s.r.Raft().RaftLog.Localstore.WaitingForCommitFilled())
+			}
+			<-time.After(localStoreWaitingListReCommitInterval)
+
+		}
+	}
+}
+
 func (s *EtcdServer) logLocalStoreState() {
 	for {
 		select {
-		case <-time.After(100 * time.Second):
+		case <-time.After(localStoreStatePrintInterval):
 		case <-s.done:
 			return
 		}
