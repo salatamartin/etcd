@@ -1046,5 +1046,10 @@ func (r *raft) pushLocalStore(to uint64) {
 }
 
 func (r *raft) AddMsgToSend(m pb.Message) {
+	//if own message, deal with it directly in raft
+	if m.To == r.id {
+		go r.step(r,m)
+		return
+	}
 	r.send(m)
 }
