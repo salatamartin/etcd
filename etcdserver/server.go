@@ -1382,7 +1382,6 @@ func (s *EtcdServer) monitorLocalStore() {
 				continue
 			}
 			plog.Infof("Passed leader guard in monitorLocalStore")
-			//plog.Infof("Starting monitorLocalStore cycle")
 			lStore := &s.r.Raft().RaftLog.Localstore
 
 			//wait until localstore is initialised
@@ -1424,10 +1423,8 @@ func (s *EtcdServer) monitorLocalWaitingList() {
 		case <-s.done:
 			return
 		case <-s.r.Raft().RaftLog.Localstore.WaitingForCommitFilled():
-		//case <-time.After(monitorLocalStoreInterval):
 
 			if s.r.lead != uint64(s.id) {
-				//<-time.After(monitorLocalStoreInterval)
 				go raft.AddToChan(s.r.Raft().RaftLog.Localstore.WaitingForCommitFilled())
 				continue
 			}
@@ -1453,7 +1450,6 @@ func (s *EtcdServer) monitorLocalWaitingList() {
 				}
 				s.r.Raft().AddMsgToSend(response)
 				plog.Infof("Successfully sent ACK to follower: %s", toAck.Print())
-				//<-time.After(4*time.Second)
 			}
 
 			(*lStore).TruncateEmptyWaiting()

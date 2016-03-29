@@ -90,8 +90,8 @@ type localStore struct {
 	context           context.Context
 	cancel            context.CancelFunc
 	kvStore           store.Store
-	entriesFilled	  chan struct{}
-	waitingFilled	  chan struct{}
+	entriesFilled     chan struct{}
+	waitingFilled     chan struct{}
 }
 
 func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) *localStore {
@@ -105,8 +105,8 @@ func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) *localStore {
 		walMutex:         sync.Mutex{},
 		lastInWal:        wSize,
 		kvStore:          store.New(ClusterPrefix, KeysPrefix),
-		entriesFilled: 	  make(chan struct{}),
-		waitingFilled:	  make(chan struct{}),
+		entriesFilled:    make(chan struct{}),
+		waitingFilled:    make(chan struct{}),
 	}
 }
 
@@ -134,7 +134,7 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 	// length was 0 before append, fill channel
 	if len(ls.ents) == 1 {
 		go AddToChan(ls.entriesFilled)
-		/*TOREMOVE*/plog.Infof("entriesFilled + 1")
+		/*TOREMOVE*/ plog.Infof("entriesFilled + 1")
 	}
 	//ls.logger.Infof("Local log after MaybeAdd: %s", FormatEnts(ls.ents))
 	//we have to wait until log is persisted on disk before continuing
@@ -208,7 +208,7 @@ func (ls *localStore) TrimWithLastSent() {
 	}
 	ls.waitingMutex.Lock()
 	ls.waitingForCommit = append(ls.waitingForCommit, ls.ents[:ls.LastSent()]...)
-	if len(ls.waitingForCommit) == len(ls.ents[:ls.LastSent()]){
+	if len(ls.waitingForCommit) == len(ls.ents[:ls.LastSent()]) {
 		go AddToChan(ls.waitingFilled)
 		plog.Infof("waitingFilled + 1")
 	}
@@ -284,7 +284,7 @@ func (ls *localStore) RemoveFromWaiting(ent pb.Entry) *pb.Entry {
 	defer ls.waitingMutex.Unlock()
 
 	for index, entry := range ls.waitingForCommit {
-		if entry.CompareMessage(ent) && entry.Timestamp == ent.Timestamp{
+		if entry.CompareMessage(ent) && entry.Timestamp == ent.Timestamp {
 			//ls.waitingForCommit = append(ls.waitingForCommit[:index], ls.waitingForCommit[index+1:]...)
 			ls.waitingForCommit[index].Data = nil
 			// if all logs are empty, clear persistent storage (not needed anymore)

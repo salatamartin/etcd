@@ -26,8 +26,6 @@ import (
 	"regexp"
 
 	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
-	//serverpb "github.com/coreos/etcd/etcdserver/etcdserverpb"
-	//"github.com/coreos/etcd/pkg/pbutil"
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	pb "github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/wal"
@@ -687,7 +685,6 @@ func stepLeader(r *raft, m pb.Message) {
 		handleMsgLocalStoreCommited(r, m)
 		return
 	case pb.MsgLocalStoreCommitedResp:
-		//TODO: remove from waitingForCommit
 		r.RaftLog.Localstore.RemoveFromWaiting(m.Entries[0])
 	}
 
