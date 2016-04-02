@@ -1369,6 +1369,10 @@ func (s *EtcdServer) Backend() backend.Backend {
 
 func (s *EtcdServer) AuthStore() auth.AuthStore { return s.authStore }
 
+// waits for entries to be stored in local store and tries to commit them
+// commits only if is leader
+// if not follower, stays idle
+// should be started in separate goroutine
 func (s *EtcdServer) monitorLocalStore() {
 	for {
 		select {
@@ -1417,6 +1421,9 @@ func (s *EtcdServer) monitorLocalStore() {
 
 }
 
+// Waits for local store entries to be committed and moved to waiting list
+// periodically sends messages to original receiver to remove entry from local store
+// should be started in separate goroutine
 func (s *EtcdServer) monitorLocalWaitingList() {
 	for {
 		select {
@@ -1467,6 +1474,8 @@ func (s *EtcdServer) monitorLocalWaitingList() {
 	}
 }
 
+// periodically shows state of local store
+// should be started in separate goroutine
 func (s *EtcdServer) logLocalStoreState() {
 	for {
 		select {
