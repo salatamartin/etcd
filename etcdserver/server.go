@@ -1440,7 +1440,7 @@ func (s *EtcdServer) monitorLocalWaitingList() {
 					continue
 				}
 				response := raftpb.Message{
-					Type:      raftpb.MsgLocalStoreCommited,
+					Type:      raftpb.MsgLocalStoreCommitted,
 					To:        toAck.Receiver,
 					From:      uint64(s.ID()),
 					Term:      s.Term(),

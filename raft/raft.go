@@ -680,11 +680,11 @@ func stepLeader(r *raft, m pb.Message) {
 
 		//plog.Infof("Leader's localStore after merge: %v", m.Entries)
 		return
-	case pb.MsgLocalStoreCommited:
+	case pb.MsgLocalStoreCommitted:
 		plog.Infof("Received my own Local store commited message")
 		handleMsgLocalStoreCommited(r, m)
 		return
-	case pb.MsgLocalStoreCommitedResp:
+	case pb.MsgLocalStoreCommittedResp:
 		r.RaftLog.Localstore.RemoveFromWaiting(m.Entries[0])
 	}
 
@@ -777,7 +777,7 @@ func handleMsgLocalStoreCommited(r *raft, m pb.Message) {
 	} else {
 		plog.Infof("Entry with given timestamp not found!")
 	}
-	m.Type = pb.MsgLocalStoreCommitedResp
+	m.Type = pb.MsgLocalStoreCommittedResp
 	m.To = m.From
 	m.From = r.id
 	r.send(m)
@@ -811,7 +811,7 @@ func stepCandidate(r *raft, m pb.Message) {
 		case len(r.votes) - gr:
 			r.becomeFollower(r.Term, None)
 		}
-	case pb.MsgLocalStoreCommited:
+	case pb.MsgLocalStoreCommitted:
 		handleMsgLocalStoreCommited(r, m)
 	}
 }
@@ -876,7 +876,7 @@ func stepFollower(r *raft, m pb.Message) {
 			r.RaftLog.Localstore.TrimWithLastSent()
 			r.RaftLog.Localstore.SetContext(nil, nil)
 		}
-	case pb.MsgLocalStoreCommited:
+	case pb.MsgLocalStoreCommitted:
 		handleMsgLocalStoreCommited(r, m)
 	}
 }

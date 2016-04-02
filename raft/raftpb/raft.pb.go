@@ -19,7 +19,6 @@
 */
 package raftpb
 
-
 import proto "github.com/coreos/etcd/Godeps/_workspace/src/github.com/gogo/protobuf/proto"
 import fmt "fmt"
 import math "math"
@@ -67,24 +66,24 @@ func (x *EntryType) UnmarshalJSON(data []byte) error {
 type MessageType int32
 
 const (
-	MsgHup                    MessageType = 0
-	MsgBeat                   MessageType = 1
-	MsgProp                   MessageType = 2
-	MsgApp                    MessageType = 3
-	MsgAppResp                MessageType = 4
-	MsgVote                   MessageType = 5
-	MsgVoteResp               MessageType = 6
-	MsgSnap                   MessageType = 7
-	MsgHeartbeat              MessageType = 8
-	MsgHeartbeatResp          MessageType = 9
-	MsgUnreachable            MessageType = 10
-	MsgSnapStatus             MessageType = 11
-	MsgCheckQuorum            MessageType = 12
-	MsgLocalStoreReq          MessageType = 13
-	MsgLocalStoreMerge        MessageType = 14
-	MsgLocalStoreMergeResp    MessageType = 15
-	MsgLocalStoreCommited     MessageType = 16
-	MsgLocalStoreCommitedResp MessageType = 17
+	MsgHup                     MessageType = 0
+	MsgBeat                    MessageType = 1
+	MsgProp                    MessageType = 2
+	MsgApp                     MessageType = 3
+	MsgAppResp                 MessageType = 4
+	MsgVote                    MessageType = 5
+	MsgVoteResp                MessageType = 6
+	MsgSnap                    MessageType = 7
+	MsgHeartbeat               MessageType = 8
+	MsgHeartbeatResp           MessageType = 9
+	MsgUnreachable             MessageType = 10
+	MsgSnapStatus              MessageType = 11
+	MsgCheckQuorum             MessageType = 12
+	MsgLocalStoreReq           MessageType = 13
+	MsgLocalStoreMerge         MessageType = 14
+	MsgLocalStoreMergeResp     MessageType = 15
+	MsgLocalStoreCommitted     MessageType = 16
+	MsgLocalStoreCommittedResp MessageType = 17
 )
 
 var MessageType_name = map[int32]string{
