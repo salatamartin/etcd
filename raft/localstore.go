@@ -30,6 +30,8 @@ type LocalStore interface {
 
 	Clear()
 
+	GetNextIndex() uint64
+
 	Merge(ents []pb.Entry)
 
 	Entries() []pb.Entry
@@ -63,7 +65,7 @@ type LocalStore interface {
 	RemoveFirst(count uint64)
 
 	//removes entry with defined timestamp
-	RemoveFromWaiting(ent pb.Entry) *pb.Entry
+	RemoveFromWaiting(receiver, index uint64) *pb.Entry
 
 	KVStore() store.Store
 
@@ -78,12 +80,14 @@ type LocalStore interface {
 
 type localStore struct {
 	entsMutex         sync.Mutex
+	indexMutex        sync.Mutex
 	waitingMutex      sync.Mutex
 	walMutex          sync.Mutex
 	ents              []pb.Entry
 	waitingForCommit  []pb.Entry
 	wal               *wal.WAL
 	logger            Logger
+	nextIndex		  uint64
 	lastIndexSent     uint64
 	lastTimestampSent int64
 	lastInWal         uint64
@@ -94,13 +98,14 @@ type localStore struct {
 	waitingFilled     chan struct{}
 }
 
-func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) *localStore {
-	return &localStore{
+func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) localStore {
+	return localStore{
 		ents:             []pb.Entry{},
 		waitingForCommit: []pb.Entry{},
 		wal:              w,
 		logger:           log,
 		entsMutex:        sync.Mutex{},
+		indexMutex:        sync.Mutex{},
 		waitingMutex:     sync.Mutex{},
 		walMutex:         sync.Mutex{},
 		lastInWal:        wSize,
@@ -110,11 +115,18 @@ func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) *localStore {
 	}
 }
 
+func (ls *localStore) GetNextIndex() uint64{
+	ls.indexMutex.Lock()
+	defer ls.indexMutex.Unlock()
+	ls.nextIndex++
+	return ls.nextIndex - 1
+}
+
 func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 	ls.entsMutex.Lock()
 	defer ls.entsMutex.Unlock()
 	for index, entry := range ls.ents {
-		if entry.CompareMessage(ent) {
+		if entry.CompareRequest(ent) {
 			if entry.Term > ent.Term {
 				errStr := fmt.Sprintf("Conflict found, localstore already has entry %s, but with higher term", ent.Print())
 				plog.Infof(errStr)
@@ -279,12 +291,17 @@ func (ls *localStore) RemoveFirst(count uint64) {
 	}
 }
 
-func (ls *localStore) RemoveFromWaiting(ent pb.Entry) *pb.Entry {
+func (ls *localStore) RemoveFromWaiting(receiver, index uint64) *pb.Entry {
 	ls.waitingMutex.Lock()
 	defer ls.waitingMutex.Unlock()
 
+	tmpEntry := pb.Entry{
+		Receiver:receiver,
+		Index:index,
+	}
+
 	for index, entry := range ls.waitingForCommit {
-		if entry.CompareMessage(ent) && entry.Timestamp == ent.Timestamp {
+		if entry.CompareID(tmpEntry) {
 			//ls.waitingForCommit = append(ls.waitingForCommit[:index], ls.waitingForCommit[index+1:]...)
 			ls.waitingForCommit[index].Data = nil
 			// if all logs are empty, clear persistent storage (not needed anymore)

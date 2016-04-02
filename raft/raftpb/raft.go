@@ -21,8 +21,12 @@ func (e *Entry) RetrieveMessage() serverpb.Request {
 	return request
 }
 
+func (e *Entry) CompareID(e2 Entry) bool {
+	return e.Receiver == e2.Receiver && e.Index == e2.Index
+}
+
 //returns true if messages have same method and same key
-func (e *Entry) CompareMessage(e2 Entry) bool {
+func (e *Entry) CompareRequest(e2 Entry) bool {
 	req1 := e.RetrieveMessage()
 	req2 := e2.RetrieveMessage()
 	return req1.Method == req2.Method && req1.Path == req2.Path
