@@ -506,7 +506,7 @@ func (r *raft) becomeFollower(term uint64, lead uint64) {
 		if len(r.RaftLog.LocalStore.WaitingForCommitEntries()) == 0 {
 			return
 		}
-		r.RaftLog.LocalStore.RemoveWaitingList()
+		r.RaftLog.LocalStore.ClearWaitingList()
 	}()
 }
 

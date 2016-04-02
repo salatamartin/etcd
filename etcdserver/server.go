@@ -1398,7 +1398,7 @@ func (s *EtcdServer) monitorLocalStore() {
 			ctx, cancel := context.WithCancel(context.Background())
 			for len((*lStore).Entries()) != 0 {
 				toCommit := (*lStore).Entries()[0]
-				message := toCommit.RetrieveMessage()
+				message := toCommit.RetrieveRequest()
 				message.NoQuorumRequest = false
 				message.Blocking = true
 				message.Quorum = true
