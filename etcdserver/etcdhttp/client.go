@@ -543,10 +543,10 @@ func parseKeyRequest(r *http.Request, clock clockwork.Clock) (etcdserverpb.Reque
 		quorum = true
 	}
 
-	if noquorumreq, err = getBool(r.Form, "noquorumrequest"); err != nil {
+	if noquorumreq, err = getBool(r.Form, "nqrequest"); err != nil {
 		return emptyReq, etcdErr.NewRequestError(
 			etcdErr.EcodeInvalidField,
-			`invalid value for "noquorumrequest"`,
+			`invalid value for "nqrequest"`,
 		)
 	}
 
