@@ -217,7 +217,7 @@ func newRaft(c *Config) *raft {
 	}
 	raftlog := newLog(c.Storage, c.Logger, c.LocalWal, uint64(len(c.MaybeEnts)))
 	if c.MaybeEnts != nil && len(c.MaybeEnts) > 0 {
-		raftlog.Localstore.Merge(c.MaybeEnts)
+		raftlog.LocalStore.Merge(c.MaybeEnts)
 	}
 
 	hs, cs, err := c.Storage.InitialState()
@@ -503,10 +503,10 @@ func (r *raft) becomeFollower(term uint64, lead uint64) {
 	r.state = StateFollower
 	r.logger.Infof("%x became follower at term %d", r.id, r.Term)
 	go func() {
-		if len(r.RaftLog.Localstore.WaitingForCommitEntries()) == 0 {
+		if len(r.RaftLog.LocalStore.WaitingForCommitEntries()) == 0 {
 			return
 		}
-		r.RaftLog.Localstore.RemoveWaitingList()
+		r.RaftLog.LocalStore.ClearWaitingList()
 	}()
 }
 
@@ -548,10 +548,10 @@ func (r *raft) becomeLeader() {
 		r.pendingConf = true
 	}
 	go func() {
-		if len(r.RaftLog.Localstore.WaitingForCommitEntries()) == 0 {
+		if len(r.RaftLog.LocalStore.WaitingForCommitEntries()) == 0 {
 			return
 		}
-		r.RaftLog.Localstore.ResetWaitingList()
+		r.RaftLog.LocalStore.ResetWaitingList()
 	}()
 	r.appendEntry(pb.Entry{Data: nil})
 	r.logger.Infof("%x became leader at term %d", r.id, r.Term)
@@ -667,7 +667,7 @@ func stepLeader(r *raft, m pb.Message) {
 	case pb.MsgLocalStoreMerge:
 		//plog.Infof("Received local store from %x to merge: %s", m.From, FormatEnts(m.Entries))
 		go func(m pb.Message) {
-			r.RaftLog.Localstore.Merge(m.Entries)
+			r.RaftLog.LocalStore.Merge(m.Entries)
 			response := pb.Message{
 				Type:      pb.MsgLocalStoreMergeResp,
 				To:        m.From,
@@ -675,7 +675,7 @@ func stepLeader(r *raft, m pb.Message) {
 				Timestamp: m.Timestamp,
 			}
 			r.send(response)
-			r.RaftLog.Localstore.TruncateEmpty()
+			r.RaftLog.LocalStore.TruncateEmpty()
 		}(m)
 
 		//plog.Infof("Leader's localStore after merge: %v", m.Entries)
@@ -685,7 +685,7 @@ func stepLeader(r *raft, m pb.Message) {
 		handleMsgLocalStoreCommited(r, m)
 		return
 	case pb.MsgLocalStoreCommittedResp:
-		r.RaftLog.Localstore.RemoveFromWaiting(m.Entries[0])
+		r.RaftLog.LocalStore.RemoveFromWaiting(m.Entries[0].Receiver, m.Entries[0].Index)
 	}
 
 	// All other message types require a progress for m.From (pr).
@@ -768,10 +768,10 @@ func stepLeader(r *raft, m pb.Message) {
 
 func handleMsgLocalStoreCommited(r *raft, m pb.Message) {
 	entry := m.Entries[0]
-	e := r.RaftLog.Localstore.RemoveFromWaiting(entry)
-	r.RaftLog.Localstore.TruncateEmptyWaiting()
+	e := r.RaftLog.LocalStore.RemoveFromWaiting(entry.Receiver,entry.Index)
 	plog.Infof("Received MsgLocalStoreCommited message, with timestamp of committed message %v", time.Unix(0, m.Timestamp))
 	if e != nil {
+		r.RaftLog.LocalStore.TruncateEmptyWaiting()
 		plog.Infof("Entry %s successfully commited with quorum, removed from peristent storage", e.Print())
 
 	} else {
@@ -833,16 +833,16 @@ func stepFollower(r *raft, m pb.Message) {
 		r.electionElapsed = 0
 		r.lead = m.From
 		r.handleHeartbeat(m)
-		if len(r.RaftLog.Localstore.Entries()) == 0 {
+		if len(r.RaftLog.LocalStore.Entries()) == 0 {
 			break
 		}
 		var ctx context.Context
 		var cancel context.CancelFunc
 
-		ctx, cancel = r.RaftLog.Localstore.Context()
+		ctx, cancel = r.RaftLog.LocalStore.Context()
 		if ctx == nil {
 			ctx, cancel = context.WithTimeout(context.Background(), pushLocalStoreDeadline)
-			r.RaftLog.Localstore.SetContext(ctx, cancel)
+			r.RaftLog.LocalStore.SetContext(ctx, cancel)
 			r.pushLocalStore(m.From)
 		} else {
 			select {
@@ -850,7 +850,7 @@ func stepFollower(r *raft, m pb.Message) {
 				plog.Infof("Deadline for LocalStore response is finished")
 				plog.Infof("Context is %v", ctx)
 				cancel()
-				r.RaftLog.Localstore.SetContext(nil, nil)
+				r.RaftLog.LocalStore.SetContext(nil, nil)
 				//r.RaftLog.Localstore.SetLastSent(0)
 			default:
 			}
@@ -871,10 +871,10 @@ func stepFollower(r *raft, m pb.Message) {
 			r.send(pb.Message{To: m.From, Type: pb.MsgVoteResp, Reject: true})
 		}
 	case pb.MsgLocalStoreMergeResp:
-		if m.Timestamp == r.RaftLog.Localstore.LastTimestampSent() {
+		if m.Timestamp == r.RaftLog.LocalStore.LastTimestampSent() {
 			plog.Infof("Received MsfLocalStoreResp with valid lastTimestampSent (%v), moving log to waitingForCommit", time.Unix(0, m.Timestamp))
-			r.RaftLog.Localstore.TrimWithLastSent()
-			r.RaftLog.Localstore.SetContext(nil, nil)
+			r.RaftLog.LocalStore.TrimWithLastSent()
+			r.RaftLog.LocalStore.SetContext(nil, nil)
 		}
 	case pb.MsgLocalStoreCommitted:
 		handleMsgLocalStoreCommited(r, m)
@@ -1027,11 +1027,11 @@ func (r *raft) checkQuorumActive() bool {
 }
 
 func (r *raft) pushLocalStore(to uint64) {
-	ents := r.RaftLog.Localstore.Entries()
+	ents := r.RaftLog.LocalStore.Entries()
 	ls := uint64(len(ents))
 	ts := time.Now().UnixNano()
-	r.RaftLog.Localstore.SetLastSent(ls)
-	r.RaftLog.Localstore.SetLastTimestampSent(ts)
+	r.RaftLog.LocalStore.SetLastSent(ls)
+	r.RaftLog.LocalStore.SetLastTimestampSent(ts)
 
 	//TODO: is term and index here necessary?
 	m := pb.Message{

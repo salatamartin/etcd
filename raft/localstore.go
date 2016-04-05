@@ -30,6 +30,8 @@ type LocalStore interface {
 
 	Clear()
 
+	GetNextIndex() uint64
+
 	Merge(ents []pb.Entry)
 
 	Entries() []pb.Entry
@@ -63,7 +65,7 @@ type LocalStore interface {
 	RemoveFirst(count uint64)
 
 	//removes entry with defined timestamp
-	RemoveFromWaiting(ent pb.Entry) *pb.Entry
+	RemoveFromWaiting(receiver, index uint64) *pb.Entry
 
 	KVStore() store.Store
 
@@ -78,12 +80,14 @@ type LocalStore interface {
 
 type localStore struct {
 	entsMutex         sync.Mutex
+	indexMutex        sync.Mutex
 	waitingMutex      sync.Mutex
 	walMutex          sync.Mutex
 	ents              []pb.Entry
 	waitingForCommit  []pb.Entry
 	wal               *wal.WAL
 	logger            Logger
+	nextIndex		  uint64
 	lastIndexSent     uint64
 	lastTimestampSent int64
 	lastInWal         uint64
@@ -94,13 +98,14 @@ type localStore struct {
 	waitingFilled     chan struct{}
 }
 
-func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) *localStore {
-	return &localStore{
+func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) localStore {
+	return localStore{
 		ents:             []pb.Entry{},
 		waitingForCommit: []pb.Entry{},
 		wal:              w,
 		logger:           log,
 		entsMutex:        sync.Mutex{},
+		indexMutex:        sync.Mutex{},
 		waitingMutex:     sync.Mutex{},
 		walMutex:         sync.Mutex{},
 		lastInWal:        wSize,
@@ -110,11 +115,23 @@ func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) *localStore {
 	}
 }
 
+// returns next unique index for local entries and increases value atomically for future calls
+// can overflow
+func (ls *localStore) GetNextIndex() uint64{
+	ls.indexMutex.Lock()
+	defer ls.indexMutex.Unlock()
+	ls.nextIndex++
+	return ls.nextIndex - 1
+}
+
+// tries to add entry to local log, persistent storage and reflect it to KV store
+// fails if entry with the same request header, term and timestamp already exists
+// if successful, returns event from KV store
 func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 	ls.entsMutex.Lock()
 	defer ls.entsMutex.Unlock()
 	for index, entry := range ls.ents {
-		if entry.CompareMessage(ent) {
+		if entry.CompareRequest(ent) {
 			if entry.Term > ent.Term {
 				errStr := fmt.Sprintf("Conflict found, localstore already has entry %s, but with higher term", ent.Print())
 				plog.Infof(errStr)
@@ -126,6 +143,8 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 					return nil, errors.New(errStr)
 				}
 			}
+			//if entry with same header, but lower term or timestamp found
+			//set it to nil instead of removing and truncate empty values later
 			ls.ents[index].Data = nil
 			break
 		}
@@ -145,7 +164,7 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 	ls.walMutex.Unlock()
 
 	//write to KVstore to get the Event
-	r := ent.RetrieveMessage()
+	r := ent.RetrieveRequest()
 	event, err := ls.kvStore.Set(r.Path, r.Dir, r.Val, store.TTLOptionSet{ExpireTime: store.Permanent})
 	if err != nil {
 		plog.Infof("Could not write entry to local KV store")
@@ -155,16 +174,13 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 	return event, nil
 }
 
-func (ls *localStore) Clear() {
-	ls.entsMutex.Lock()
-	defer ls.entsMutex.Unlock()
-	ls.ents = []pb.Entry{}
-}
-
+//returns list of local entries
 func (ls *localStore) Entries() []pb.Entry { return ls.ents }
 
+//returns list of entries waiting to be committed before removing
 func (ls *localStore) WaitingForCommitEntries() []pb.Entry { return ls.waitingForCommit }
 
+//merges two lists of local entries
 func (ls *localStore) Merge(ents []pb.Entry) {
 	if len(ls.ents) == 0 {
 		ls.entsMutex.Lock()
@@ -183,18 +199,21 @@ func (ls *localStore) Merge(ents []pb.Entry) {
 	}
 }
 
+// returns the index(local index, not unique) of last value snt for commit
 func (ls *localStore) LastSent() uint64 { return ls.lastIndexSent }
 
 func (ls *localStore) SetLastSent(index uint64) {
 	ls.lastIndexSent = index
 }
 
+// returns timestamp of last merge request sent
 func (ls *localStore) LastTimestampSent() int64 { return ls.lastTimestampSent }
 
 func (ls *localStore) SetLastTimestampSent(ts int64) {
 	ls.lastTimestampSent = ts
 }
 
+// returns current context of local store used for sending merge requests
 func (ls *localStore) Context() (context.Context, context.CancelFunc) { return ls.context, ls.cancel }
 
 func (ls *localStore) SetContext(ctx context.Context, cancel context.CancelFunc) {
@@ -202,6 +221,7 @@ func (ls *localStore) SetContext(ctx context.Context, cancel context.CancelFunc)
 	ls.cancel = cancel
 }
 
+// moves all entries already pushed to leader to waiting list
 func (ls *localStore) TrimWithLastSent() {
 	if ls.LastSent() == 0 {
 		return
@@ -225,6 +245,7 @@ func (ls *localStore) TrimWithLastSent() {
 	ls.SetLastSent(0)
 }
 
+//removes all entries with nil or empty data value
 func (ls *localStore) TruncateEmpty() int {
 	ls.entsMutex.Lock()
 	defer ls.entsMutex.Unlock()
@@ -246,6 +267,7 @@ func (ls *localStore) TruncateEmpty() int {
 	return count
 }
 
+//removes all entries from waiting list with nil or empty data value
 func (ls *localStore) TruncateEmptyWaiting() int {
 	ls.waitingMutex.Lock()
 	defer ls.waitingMutex.Unlock()
@@ -267,6 +289,7 @@ func (ls *localStore) TruncateEmptyWaiting() int {
 	return count
 }
 
+// removes first count values from local log
 func (ls *localStore) RemoveFirst(count uint64) {
 	ls.entsMutex.Lock()
 	defer ls.entsMutex.Unlock()
@@ -279,12 +302,19 @@ func (ls *localStore) RemoveFirst(count uint64) {
 	}
 }
 
-func (ls *localStore) RemoveFromWaiting(ent pb.Entry) *pb.Entry {
+// removes entry from waiting list after successful commit
+// original receiver and local unique id uniquely identifies all local requests
+func (ls *localStore) RemoveFromWaiting(receiver, index uint64) *pb.Entry {
 	ls.waitingMutex.Lock()
 	defer ls.waitingMutex.Unlock()
 
+	tmpEntry := pb.Entry{
+		Receiver:receiver,
+		Index:index,
+	}
+
 	for index, entry := range ls.waitingForCommit {
-		if entry.CompareMessage(ent) && entry.Timestamp == ent.Timestamp {
+		if entry.CompareID(tmpEntry) {
 			//ls.waitingForCommit = append(ls.waitingForCommit[:index], ls.waitingForCommit[index+1:]...)
 			ls.waitingForCommit[index].Data = nil
 			// if all logs are empty, clear persistent storage (not needed anymore)
@@ -296,7 +326,7 @@ func (ls *localStore) RemoveFromWaiting(ent pb.Entry) *pb.Entry {
 
 			//remove entry from KV store
 			go func(entry pb.Entry) {
-				r := entry.RetrieveMessage()
+				r := entry.RetrieveRequest()
 				//TODO: check other request types
 				if r.Method == "PUT" {
 					ls.kvStore.Delete(r.Path, r.Dir, r.Recursive)
@@ -316,8 +346,11 @@ func FormatEnts(ents []pb.Entry) string {
 	return buffer.String()
 }
 
+//returns current key-value representation of local store
 func (ls *localStore) KVStore() store.Store { return ls.kvStore }
 
+// removes write-ahead log and creates a new one
+// should only be called, when all entries were successfully committed
 func (ls *localStore) resetLocalWal() {
 	ls.walMutex.Lock()
 	defer ls.walMutex.Unlock()
@@ -343,6 +376,7 @@ func (ls *localStore) resetLocalWal() {
 	plog.Infof("Successfully removed all entries from persistent storage")
 }
 
+// moves all entries from waiting list back to entries
 func (ls *localStore) ResetWaitingList() {
 	ls.entsMutex.Lock()
 	defer ls.entsMutex.Unlock()
@@ -351,21 +385,25 @@ func (ls *localStore) ResetWaitingList() {
 	ls.ents = append(ls.ents, ls.waitingForCommit...)
 }
 
-func (ls *localStore) RemoveWaitingList() {
+// removes all entries from waiting list
+func (ls *localStore) ClearWaitingList() {
 	ls.waitingMutex.Lock()
 	defer ls.waitingMutex.Unlock()
 	ls.waitingForCommit = []pb.Entry{}
 }
 
+// channel representing whether any entries are present
 func (ls *localStore) EntriesFilled() chan struct{} {
 	return ls.entriesFilled
 }
 
+// channel representing whether any entries are present in waiting list
 func (ls *localStore) WaitingForCommitFilled() chan struct{} {
 	return ls.waitingFilled
 }
 
-//should be called in separate goroutine
+// adds empty idem to given channel
+// should be called in separate goroutine
 func AddToChan(c chan struct{}) {
 	c <- struct{}{}
 }

@@ -25,6 +25,7 @@ import math "math"
 
 import io "io"
 
+
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
 var _ = fmt.Errorf
@@ -103,28 +104,28 @@ var MessageType_name = map[int32]string{
 	13: "MsgLocalStoreReq",
 	14: "MsgLocalStoreMerge",
 	15: "MsgLocalStoreMergeResp",
-	16: "MsgLocalStoreCommited",
-	17: "MsgLocalStoreCommitedResp",
+	16: "MsgLocalStoreCommitted",
+	17: "MsgLocalStoreCommittedResp",
 }
 var MessageType_value = map[string]int32{
-	"MsgHup":                    0,
-	"MsgBeat":                   1,
-	"MsgProp":                   2,
-	"MsgApp":                    3,
-	"MsgAppResp":                4,
-	"MsgVote":                   5,
-	"MsgVoteResp":               6,
-	"MsgSnap":                   7,
-	"MsgHeartbeat":              8,
-	"MsgHeartbeatResp":          9,
-	"MsgUnreachable":            10,
-	"MsgSnapStatus":             11,
-	"MsgCheckQuorum":            12,
-	"MsgLocalStoreReq":          13,
-	"MsgLocalStoreMerge":        14,
-	"MsgLocalStoreMergeResp":    15,
-	"MsgLocalStoreCommited":     16,
-	"MsgLocalStoreCommitedResp": 17,
+	"MsgHup":                     0,
+	"MsgBeat":                    1,
+	"MsgProp":                    2,
+	"MsgApp":                     3,
+	"MsgAppResp":                 4,
+	"MsgVote":                    5,
+	"MsgVoteResp":                6,
+	"MsgSnap":                    7,
+	"MsgHeartbeat":               8,
+	"MsgHeartbeatResp":           9,
+	"MsgUnreachable":             10,
+	"MsgSnapStatus":              11,
+	"MsgCheckQuorum":             12,
+	"MsgLocalStoreReq":           13,
+	"MsgLocalStoreMerge":         14,
+	"MsgLocalStoreMergeResp":     15,
+	"MsgLocalStoreCommitted":     16,
+	"MsgLocalStoreCommittedResp": 17,
 }
 
 func (x MessageType) Enum() *MessageType {

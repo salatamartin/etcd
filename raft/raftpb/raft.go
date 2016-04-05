@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func (e *Entry) RetrieveMessage() serverpb.Request {
+func (e *Entry) RetrieveRequest() serverpb.Request {
 	var request serverpb.Request
 	var raftReq serverpb.InternalRaftRequest
 	if !pbutil.MaybeUnmarshal(&raftReq, e.Data) { // backward compatible
@@ -21,10 +21,14 @@ func (e *Entry) RetrieveMessage() serverpb.Request {
 	return request
 }
 
+func (e *Entry) CompareID(e2 Entry) bool {
+	return e.Receiver == e2.Receiver && e.Index == e2.Index
+}
+
 //returns true if messages have same method and same key
-func (e *Entry) CompareMessage(e2 Entry) bool {
-	req1 := e.RetrieveMessage()
-	req2 := e2.RetrieveMessage()
+func (e *Entry) CompareRequest(e2 Entry) bool {
+	req1 := e.RetrieveRequest()
+	req2 := e2.RetrieveRequest()
 	return req1.Method == req2.Method && req1.Path == req2.Path
 }
 
@@ -33,7 +37,7 @@ func (e *Entry) AddTimestamp() {
 }
 
 func (e *Entry) Print() string {
-	msg := e.RetrieveMessage()
+	msg := e.RetrieveRequest()
 	msgStr := fmt.Sprintf("M:%s K:%s V:%s NQP:%t", msg.Method, msg.Path, msg.Val, msg.NoQuorumRequest)
 	return fmt.Sprintf("{T:%d I:%d Ts:%v R:%x M:(%s)}", e.Term, e.Index, time.Unix(0, e.Timestamp), e.Receiver, msgStr)
 }

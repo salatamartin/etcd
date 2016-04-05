@@ -743,13 +743,13 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 		if r.Method == "PUT" && r.NoQuorumRequest {
 			entry := raftpb.Entry{
 				Term:      s.Term(),
-				Index:     s.Index(),
+				Index:     s.r.Raft().RaftLog.LocalStore.GetNextIndex(),
 				Timestamp: raftpb.NewTimestamp(),
 				Receiver:  uint64(s.ID()),
 				Data:      data,
 			}
 			//plog.Infof("NQPUT request received: %v", r)
-			event, err := s.r.Raft().RaftLog.Localstore.MaybeAdd(entry)
+			event, err := s.r.Raft().RaftLog.LocalStore.MaybeAdd(entry)
 			if err != nil {
 				plog.Infof("Error during MaybeAdd, error: %s", err.Error())
 				return Response{}, err
@@ -789,7 +789,7 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 			return Response{Watcher: wc}, nil
 		default:
 			//check local store for entry first, lEventErr holds info if "keynotfound"
-			lEvent, lEventErr := s.r.Raft().RaftLog.Localstore.KVStore().Get(r.Path, r.Recursive, r.Sorted)
+			lEvent, lEventErr := s.r.Raft().RaftLog.LocalStore.KVStore().Get(r.Path, r.Recursive, r.Sorted)
 			if lEventErr != nil {
 				ev, err := s.store.Get(r.Path, r.Recursive, r.Sorted)
 				if err != nil {
@@ -1369,20 +1369,24 @@ func (s *EtcdServer) Backend() backend.Backend {
 
 func (s *EtcdServer) AuthStore() auth.AuthStore { return s.authStore }
 
+// waits for entries to be stored in local store and tries to commit them
+// commits only if is leader
+// if not follower, stays idle
+// should be started in separate goroutine
 func (s *EtcdServer) monitorLocalStore() {
 	for {
 		select {
 		case <-s.done:
 			return
-		case <-s.r.Raft().RaftLog.Localstore.EntriesFilled():
+		case <-s.r.Raft().RaftLog.LocalStore.EntriesFilled():
 
 			if s.r.lead != uint64(s.id) {
 				<-time.After(monitorLocalStoreInterval)
-				go raft.AddToChan(s.r.Raft().RaftLog.Localstore.EntriesFilled())
+				go raft.AddToChan(s.r.Raft().RaftLog.LocalStore.EntriesFilled())
 				continue
 			}
 			plog.Infof("Passed leader guard in monitorLocalStore")
-			lStore := &s.r.Raft().RaftLog.Localstore
+			lStore := &s.r.Raft().RaftLog.LocalStore
 
 			//wait until localstore is initialised
 			if lStore == nil {
@@ -1398,7 +1402,7 @@ func (s *EtcdServer) monitorLocalStore() {
 			ctx, cancel := context.WithCancel(context.Background())
 			for len((*lStore).Entries()) != 0 {
 				toCommit := (*lStore).Entries()[0]
-				message := toCommit.RetrieveMessage()
+				message := toCommit.RetrieveRequest()
 				message.NoQuorumRequest = false
 				message.Blocking = true
 				message.Quorum = true
@@ -1417,18 +1421,21 @@ func (s *EtcdServer) monitorLocalStore() {
 
 }
 
+// Waits for local store entries to be committed and moved to waiting list
+// periodically sends messages to original receiver to remove entry from local store
+// should be started in separate goroutine
 func (s *EtcdServer) monitorLocalWaitingList() {
 	for {
 		select {
 		case <-s.done:
 			return
-		case <-s.r.Raft().RaftLog.Localstore.WaitingForCommitFilled():
+		case <-s.r.Raft().RaftLog.LocalStore.WaitingForCommitFilled():
 
 			if s.r.lead != uint64(s.id) {
-				go raft.AddToChan(s.r.Raft().RaftLog.Localstore.WaitingForCommitFilled())
+				go raft.AddToChan(s.r.Raft().RaftLog.LocalStore.WaitingForCommitFilled())
 				continue
 			}
-			lStore := &s.r.Raft().RaftLog.Localstore
+			lStore := &s.r.Raft().RaftLog.LocalStore
 
 			if len((*lStore).Entries()) == 0 && len((*lStore).WaitingForCommitEntries()) == 0 {
 				continue
@@ -1446,7 +1453,12 @@ func (s *EtcdServer) monitorLocalWaitingList() {
 					Term:      s.Term(),
 					Index:     s.Index(),
 					Timestamp: toAck.Timestamp,
-					Entries:   []raftpb.Entry{toAck},
+					Entries: []raftpb.Entry{
+						raftpb.Entry{
+							Receiver: toAck.Receiver,
+							Index:    toAck.Index,
+						},
+					},
 				}
 				s.r.Raft().AddMsgToSend(response)
 				plog.Infof("Successfully sent ACK to follower: %s", toAck.Print())
@@ -1454,7 +1466,7 @@ func (s *EtcdServer) monitorLocalWaitingList() {
 
 			(*lStore).TruncateEmptyWaiting()
 			if len((*lStore).WaitingForCommitEntries()) != 0 {
-				go raft.AddToChan(s.r.Raft().RaftLog.Localstore.WaitingForCommitFilled())
+				go raft.AddToChan(s.r.Raft().RaftLog.LocalStore.WaitingForCommitFilled())
 			}
 			<-time.After(localStoreWaitingListReCommitInterval)
 
@@ -1462,6 +1474,8 @@ func (s *EtcdServer) monitorLocalWaitingList() {
 	}
 }
 
+// periodically shows state of local store
+// should be started in separate goroutine
 func (s *EtcdServer) logLocalStoreState() {
 	for {
 		select {
@@ -1470,14 +1484,14 @@ func (s *EtcdServer) logLocalStoreState() {
 			return
 		}
 
-		lStore := &s.r.Raft().RaftLog.Localstore
+		lStore := &s.r.Raft().RaftLog.LocalStore
 
 		//wait until localstore is initialised
 		if lStore == nil {
 			continue
 		}
 
-		plog.Infof("State of localStore.Entries: %s", raft.FormatEnts(s.r.Raft().RaftLog.Localstore.Entries()))
-		plog.Infof("State of localStore.WaitingForCommit: %s", raft.FormatEnts(s.r.Raft().RaftLog.Localstore.WaitingForCommitEntries()))
+		plog.Infof("State of localStore.Entries: %s", raft.FormatEnts(s.r.Raft().RaftLog.LocalStore.Entries()))
+		plog.Infof("State of localStore.WaitingForCommit: %s", raft.FormatEnts(s.r.Raft().RaftLog.LocalStore.WaitingForCommitEntries()))
 	}
 }
