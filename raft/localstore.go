@@ -402,8 +402,20 @@ func (ls *localStore) WaitingForCommitFilled() chan struct{} {
 	return ls.waitingFilled
 }
 
+func (ls *localStore) ClearExternEntries(myID uint64) {
+	ls.entsMutex.Lock()
+	defer ls.entsMutex.Unlock()
+	for _,entry := range ls.ents {
+		if entry.Receiver != myID {
+			entry.Data = nil
+		}
+	}
+}
+
 // adds empty idem to given channel
 // should be called in separate goroutine
 func AddToChan(c chan struct{}) {
-	c <- struct{}{}
+	if c != nil {
+		c <- struct{}{}
+	}
 }

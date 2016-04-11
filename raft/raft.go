@@ -496,6 +496,9 @@ func (r *raft) tickHeartbeat() {
 }
 
 func (r *raft) becomeFollower(term uint64, lead uint64) {
+	if r.state == StateLeader {
+		go r.RaftLog.LocalStore.ClearExternEntries(r.id)
+	}
 	r.step = stepFollower
 	r.reset(term)
 	r.tick = r.tickElection
@@ -514,6 +517,9 @@ func (r *raft) becomeCandidate() {
 	// TODO(xiangli) remove the panic when the raft implementation is stable
 	if r.state == StateLeader {
 		panic("invalid transition [leader -> candidate]")
+	}
+	if r.state == StateLeader {
+		go r.RaftLog.LocalStore.ClearExternEntries(r.id)
 	}
 	r.step = stepCandidate
 	r.reset(r.Term + 1)
@@ -836,10 +842,7 @@ func stepFollower(r *raft, m pb.Message) {
 		if len(r.RaftLog.LocalStore.Entries()) == 0 {
 			break
 		}
-		var ctx context.Context
-		var cancel context.CancelFunc
-
-		ctx, cancel = r.RaftLog.LocalStore.Context()
+		ctx, cancel := r.RaftLog.LocalStore.Context()
 		if ctx == nil {
 			ctx, cancel = context.WithTimeout(context.Background(), pushLocalStoreDeadline)
 			r.RaftLog.LocalStore.SetContext(ctx, cancel)
@@ -848,7 +851,6 @@ func stepFollower(r *raft, m pb.Message) {
 			select {
 			case <-ctx.Done():
 				plog.Infof("Deadline for LocalStore response is finished")
-				plog.Infof("Context is %v", ctx)
 				cancel()
 				r.RaftLog.LocalStore.SetContext(nil, nil)
 				//r.RaftLog.Localstore.SetLastSent(0)

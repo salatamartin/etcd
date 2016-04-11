@@ -1385,7 +1385,7 @@ func (s *EtcdServer) monitorLocalStore() {
 				go raft.AddToChan(s.r.Raft().RaftLog.LocalStore.EntriesFilled())
 				continue
 			}
-			plog.Infof("Passed leader guard in monitorLocalStore")
+
 			lStore := &s.r.Raft().RaftLog.LocalStore
 
 			//wait until localstore is initialised
