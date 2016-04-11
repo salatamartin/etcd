@@ -125,8 +125,8 @@ func (c *ServerConfig) WALDir() string {
 }
 
 func (c *ServerConfig) LocalWALDir() string {
-	if c.DedicatedWALDir != "" {
-		return c.DedicatedWALDir
+	if c.DedicatedLocalWALDir != "" {
+		return c.DedicatedLocalWALDir
 	}
 	return path.Join(c.MemberDir(), "localWal")
 }
