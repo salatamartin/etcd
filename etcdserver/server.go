@@ -1410,9 +1410,33 @@ func (s *EtcdServer) monitorLocalStore() {
 				if err != nil {
 					continue
 				}
+
+				//if toCommit.Receiver == uint64(s.ID()){
+				//	s.r.Raft().RaftLog.LocalStore.RemoveFirst(1)
+				//	continue
+				//}
+
 				(*lStore).SetLastSent(1)
 				(*lStore).TrimWithLastSent()
 				plog.Infof("Successfully committed NQPUT request: %s", toCommit.Print())
+
+				//TODO:(salatamartin) check validity, refactor
+				response := raftpb.Message{
+					Type:      raftpb.MsgLocalStoreCommitted,
+					To:        toCommit.Receiver,
+					From:      uint64(s.ID()),
+					Term:      s.Term(),
+					Index:     s.Index(),
+					Timestamp: toCommit.Timestamp,
+					Entries: []raftpb.Entry{
+						raftpb.Entry{
+							Receiver: toCommit.Receiver,
+							Index:    toCommit.Index,
+						},
+					},
+				}
+
+				s.r.Raft().AddMsgToSend(response)
 
 			}
 			cancel()
@@ -1432,6 +1456,7 @@ func (s *EtcdServer) monitorLocalWaitingList() {
 		case <-s.r.Raft().RaftLog.LocalStore.WaitingForCommitFilled():
 
 			if s.r.lead != uint64(s.id) {
+				<-time.After(monitorLocalStoreInterval)
 				go raft.AddToChan(s.r.Raft().RaftLog.LocalStore.WaitingForCommitFilled())
 				continue
 			}

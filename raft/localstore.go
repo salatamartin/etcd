@@ -302,6 +302,32 @@ func (ls *localStore) RemoveFirst(count uint64) {
 	}
 }
 
+func (ls *localStore) RemoveFromEntries(receiver, index uint64) *pb.Entry {
+	ls.entsMutex.Lock()
+	defer ls.entsMutex.Unlock()
+
+	tmpEntry := pb.Entry{
+		Receiver:receiver,
+		Index:index,
+	}
+
+	for index, entry := range ls.ents {
+		if entry.CompareID(tmpEntry) {
+			ls.ents[index].Data = nil
+			//remove entry from KV store
+			go func(entry pb.Entry) {
+				r := entry.RetrieveRequest()
+				//TODO: check other request types
+				if r.Method == "PUT" {
+					ls.kvStore.Delete(r.Path, r.Dir, r.Recursive)
+				}
+			}(entry)
+			return &entry
+		}
+	}
+	return nil
+}
+
 // removes entry from waiting list after successful commit
 // original receiver and local unique id uniquely identifies all local requests
 func (ls *localStore) RemoveFromWaiting(receiver, index uint64) *pb.Entry {

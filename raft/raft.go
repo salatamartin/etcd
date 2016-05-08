@@ -35,6 +35,7 @@ import (
 // None is a placeholder node ID used when there is no leader.
 const None uint64 = 0
 const noLimit = math.MaxUint64
+const maxLocalStorePush = uint64(100)
 
 const (
 	StoreClusterPrefix = "/0"
@@ -1031,6 +1032,9 @@ func (r *raft) checkQuorumActive() bool {
 func (r *raft) pushLocalStore(to uint64) {
 	ents := r.RaftLog.LocalStore.Entries()
 	ls := uint64(len(ents))
+	if ls > maxLocalStorePush {
+		ls = maxLocalStorePush
+	}
 	ts := time.Now().UnixNano()
 	r.RaftLog.LocalStore.SetLastSent(ls)
 	r.RaftLog.LocalStore.SetLastTimestampSent(ts)
