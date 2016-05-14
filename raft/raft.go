@@ -775,6 +775,8 @@ func stepLeader(r *raft, m pb.Message) {
 
 func handleMsgLocalStoreCommited(r *raft, m pb.Message) {
 	entry := m.Entries[0]
+	// try to remove item from waiting for commit list and report success to leader
+	// (report success even if item was not find -> it has already been removed before and this is just duplicate request)
 	e := r.RaftLog.LocalStore.RemoveFromWaiting(entry.Receiver,entry.Index)
 	plog.Infof("Received MsgLocalStoreCommited message, with timestamp of committed message %v", time.Unix(0, m.Timestamp))
 	if e != nil {
@@ -840,10 +842,13 @@ func stepFollower(r *raft, m pb.Message) {
 		r.electionElapsed = 0
 		r.lead = m.From
 		r.handleHeartbeat(m)
+		
+		//check LocalStore and if it is not empty, push it to leader
 		if len(r.RaftLog.LocalStore.Entries()) == 0 {
 			break
 		}
 		ctx, cancel := r.RaftLog.LocalStore.Context()
+		//only push to leader if there is no timeout registered yet
 		if ctx == nil {
 			ctx, cancel = context.WithTimeout(context.Background(), pushLocalStoreDeadline)
 			r.RaftLog.LocalStore.SetContext(ctx, cancel)
@@ -874,6 +879,7 @@ func stepFollower(r *raft, m pb.Message) {
 			r.send(pb.Message{To: m.From, Type: pb.MsgVoteResp, Reject: true})
 		}
 	case pb.MsgLocalStoreMergeResp:
+		// check if response can be paired to the last MsgLocalStoreMerge request
 		if m.Timestamp == r.RaftLog.LocalStore.LastTimestampSent() {
 			plog.Infof("Received MsfLocalStoreResp with valid lastTimestampSent (%v), moving log to waitingForCommit", time.Unix(0, m.Timestamp))
 			r.RaftLog.LocalStore.TrimWithLastSent()

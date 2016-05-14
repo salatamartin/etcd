@@ -1380,6 +1380,7 @@ func (s *EtcdServer) monitorLocalStore() {
 			return
 		case <-s.r.Raft().RaftLog.LocalStore.EntriesFilled():
 
+			// if we are not leader, refill channel and wait to repeat
 			if s.r.lead != uint64(s.id) {
 				<-time.After(monitorLocalStoreInterval)
 				go raft.AddToChan(s.r.Raft().RaftLog.LocalStore.EntriesFilled())
@@ -1401,6 +1402,7 @@ func (s *EtcdServer) monitorLocalStore() {
 			//cycle until lStore is empty
 			ctx, cancel := context.WithCancel(context.Background())
 			for len((*lStore).Entries()) != 0 {
+				// commit every request one by one
 				toCommit := (*lStore).Entries()[0]
 				message := toCommit.RetrieveRequest()
 				message.NoQuorumRequest = false
@@ -1411,16 +1413,10 @@ func (s *EtcdServer) monitorLocalStore() {
 					continue
 				}
 
-				//if toCommit.Receiver == uint64(s.ID()){
-				//	s.r.Raft().RaftLog.LocalStore.RemoveFirst(1)
-				//	continue
-				//}
-
 				(*lStore).SetLastSent(1)
 				(*lStore).TrimWithLastSent()
 				plog.Infof("Successfully committed NQPUT request: %s", toCommit.Print())
 
-				//TODO:(salatamartin) check validity, refactor
 				response := raftpb.Message{
 					Type:      raftpb.MsgLocalStoreCommitted,
 					To:        toCommit.Receiver,
@@ -1454,7 +1450,7 @@ func (s *EtcdServer) monitorLocalWaitingList() {
 		case <-s.done:
 			return
 		case <-s.r.Raft().RaftLog.LocalStore.WaitingForCommitFilled():
-
+			// if we are not leader, refill channel and wait to repeat
 			if s.r.lead != uint64(s.id) {
 				<-time.After(monitorLocalStoreInterval)
 				go raft.AddToChan(s.r.Raft().RaftLog.LocalStore.WaitingForCommitFilled())
@@ -1467,6 +1463,7 @@ func (s *EtcdServer) monitorLocalWaitingList() {
 			}
 
 			for i := 0; i < len((*lStore).WaitingForCommitEntries()); i++ {
+				// send MsgLocalStoreCommitted to follower
 				toAck := (*lStore).WaitingForCommitEntries()[i]
 				if toAck.Data == nil {
 					continue
@@ -1486,7 +1483,7 @@ func (s *EtcdServer) monitorLocalWaitingList() {
 					},
 				}
 				s.r.Raft().AddMsgToSend(response)
-				plog.Infof("Successfully sent ACK to follower: %s", toAck.Print())
+				//plog.Infof("Successfully sent ACK to follower: %s", toAck.Print())
 			}
 
 			(*lStore).TruncateEmptyWaiting()
