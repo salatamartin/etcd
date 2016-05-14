@@ -24,24 +24,24 @@ import (
 
 type raftLog struct {
 	// storage contains all stable entries since the last snapshot.
-	storage    Storage
+	storage Storage
 
 	// unstable contains all unstable entries and snapshot.
 	// they will be saved into storage.
-	unstable   unstable
+	unstable unstable
 
 	// localstore handles non-quorum PUT requests persistently
 	LocalStore localStore
 
 	// committed is the highest log position that is known to be in
 	// stable storage on a quorum of nodes.
-	committed  uint64
+	committed uint64
 	// applied is the highest log position that the application has
 	// been instructed to apply to its state machine.
 	// Invariant: applied <= committed
-	applied    uint64
+	applied uint64
 
-	logger     Logger
+	logger Logger
 }
 
 // newLog returns log using the given storage. It recovers the log to the state
@@ -103,9 +103,7 @@ func (l *raftLog) append(ents ...pb.Entry) uint64 {
 	if after := ents[0].Index - 1; after < l.committed {
 		l.logger.Panicf("after(%d) is out of range [committed(%d)]", after, l.committed)
 	}
-	//plog.Infof("last index before truncation: %d", l.lastIndex())
 	l.unstable.truncateAndAppend(ents)
-	//plog.Infof("last index after truncation: %d", l.lastIndex())
 	return l.lastIndex()
 }
 

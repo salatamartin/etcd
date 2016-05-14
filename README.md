@@ -118,6 +118,17 @@ See [CONTRIBUTING](CONTRIBUTING.md) for details on submitting patches and the co
 
 See [reporting bugs](Documentation/reporting_bugs.md) for details about reporting any issue you may encounter.
 
+## Known bugs
+
+[GH518](https://github.com/coreos/etcd/issues/518) is a known bug. Issue is that:
+
+```
+curl http://127.0.0.1:2379/v2/keys/foo -XPUT -d value=bar
+curl http://127.0.0.1:2379/v2/keys/foo -XPUT -d dir=true -d prevExist=true
+```
+
+If the previous node is a key and client tries to overwrite it with `dir=true`, it does not give warnings such as `Not a directory`. Instead, the key is set to empty value.
+
 ## Project Details
 
 ### Versioning
@@ -137,12 +148,15 @@ curl -L http://127.0.0.1:2379/version
 
 The `v2` API responses should not change after the 2.0.0 release but new features will be added over time.
 
-#### 32-bit systems
+#### 32-bit and other unsupported systems
 
 etcd has known issues on 32-bit systems due to a bug in the Go runtime. See #[358][358] for more information.
 
-To avoid inadvertantly producing an unstable etcd server, 32-bit builds emit an `etcd` that prints
-a warning message and immediately exits.
+To avoid inadvertantly running a possibly unstable etcd server, `etcd` on unsupported architectures will print
+a warning message and immediately exit if the environment variable `ETCD_UNSUPPORTED_ARCH` is not set to
+the target architecture.
+
+Currently only the amd64 architecture is officially supported by `etcd`.
 
 [358]: https://github.com/coreos/etcd/issues/358
 

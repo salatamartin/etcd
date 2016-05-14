@@ -185,9 +185,18 @@ func testCtlV2GetRoleUser(t *testing.T, cfg *etcdProcessClusterConfig) {
 	if err := etcdctlUserGet(epc, "username"); err != nil {
 		t.Fatalf("failed to get user (%v)", err)
 	}
+	// ensure double grant gives an error; was crashing in 2.3.1
+	regrantArgs := etcdctlPrefixArgs(epc)
+	regrantArgs = append(regrantArgs, "user", "grant", "--roles", "foo", "username")
+	if err := spawnWithExpect(regrantArgs, "duplicate"); err != nil {
+		t.Fatalf("missing duplicate error on double grant role (%v)", err)
+	}
 }
 
-func TestCtlV2UserList(t *testing.T) {
+func TestCtlV2UserListUsername(t *testing.T) { testCtlV2UserList(t, "username") }
+func TestCtlV2UserListRoot(t *testing.T)     { testCtlV2UserList(t, "root") }
+
+func testCtlV2UserList(t *testing.T, username string) {
 	defer testutil.AfterTest(t)
 
 	epc := setupEtcdctlTest(t, &configWithProxy, false)
@@ -197,10 +206,10 @@ func TestCtlV2UserList(t *testing.T) {
 		}
 	}()
 
-	if err := etcdctlUserAdd(epc, "username", "password"); err != nil {
+	if err := etcdctlUserAdd(epc, username, "password"); err != nil {
 		t.Fatalf("failed to add user (%v)", err)
 	}
-	if err := etcdctlUserList(epc, "username"); err != nil {
+	if err := etcdctlUserList(epc, username); err != nil {
 		t.Fatalf("failed to list users (%v)", err)
 	}
 }

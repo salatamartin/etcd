@@ -562,7 +562,6 @@ func (r *raft) becomeLeader() {
 	}()
 	r.appendEntry(pb.Entry{Data: nil})
 	r.logger.Infof("%x became leader at term %d", r.id, r.Term)
-
 }
 
 func (r *raft) campaign() {
@@ -842,7 +841,7 @@ func stepFollower(r *raft, m pb.Message) {
 		r.electionElapsed = 0
 		r.lead = m.From
 		r.handleHeartbeat(m)
-		
+
 		//check LocalStore and if it is not empty, push it to leader
 		if len(r.RaftLog.LocalStore.Entries()) == 0 {
 			break

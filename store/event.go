@@ -26,11 +26,10 @@ const (
 )
 
 type Event struct {
-	Action          string      `json:"action"`
-	Node            *NodeExtern `json:"node,omitempty"`
-	PrevNode        *NodeExtern `json:"prevNode,omitempty"`
-	EtcdIndex       uint64      `json:"-"`
-	NoQuorumRequest bool        `json:"noQuorumRequest,omitempty"`
+	Action    string      `json:"action"`
+	Node      *NodeExtern `json:"node,omitempty"`
+	PrevNode  *NodeExtern `json:"prevNode,omitempty"`
+	EtcdIndex uint64      `json:"-"`
 }
 
 func newEvent(action string, key string, modifiedIndex, createdIndex uint64) *Event {
