@@ -19,7 +19,6 @@ import (
 	"log"
 
 	pb "github.com/coreos/etcd/raft/raftpb"
-	"github.com/coreos/etcd/wal"
 )
 
 type raftLog struct {
@@ -31,7 +30,7 @@ type raftLog struct {
 	unstable unstable
 
 	// localstore handles non-quorum PUT requests persistently
-	LocalStore localStore
+	//LocalStore localStore
 
 	// committed is the highest log position that is known to be in
 	// stable storage on a quorum of nodes.
@@ -46,14 +45,13 @@ type raftLog struct {
 
 // newLog returns log using the given storage. It recovers the log to the state
 // that it just commits and applies the latest snapshot.
-func newLog(storage Storage, logger Logger, lw *wal.WAL, lwSize uint64) *raftLog {
+func newLog(storage Storage, logger Logger) *raftLog {
 	if storage == nil {
 		log.Panic("storage must not be nil")
 	}
 	log := &raftLog{
 		storage:    storage,
 		logger:     logger,
-		LocalStore: NewLocalStore(logger, lw, lwSize),
 	}
 	firstIndex, err := storage.FirstIndex()
 	if err != nil {
