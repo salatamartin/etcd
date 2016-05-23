@@ -39,6 +39,7 @@ func NewSetCommand() cli.Command {
 			cli.IntFlag{Name: "ttl", Value: 0, Usage: "key time-to-live"},
 			cli.StringFlag{Name: "swap-with-value", Value: "", Usage: "previous value"},
 			cli.IntFlag{Name: "swap-with-index", Value: 0, Usage: "previous index"},
+			cli.BoolFlag{Name: "nqrequest", Usage: "issue a no-quorum set request"},
 		},
 		Action: func(c *cli.Context) {
 			setCommandFunc(c, mustNewKeyAPI(c))
@@ -60,9 +61,10 @@ func setCommandFunc(c *cli.Context, ki client.KeysAPI) {
 	ttl := c.Int("ttl")
 	prevValue := c.String("swap-with-value")
 	prevIndex := c.Int("swap-with-index")
+	nqrequest := c.Bool("nqrequest")
 
 	ctx, cancel := contextWithTotalTimeout(c)
-	resp, err := ki.Set(ctx, key, value, &client.SetOptions{TTL: time.Duration(ttl) * time.Second, PrevIndex: uint64(prevIndex), PrevValue: prevValue})
+	resp, err := ki.Set(ctx, key, value, &client.SetOptions{TTL: time.Duration(ttl) * time.Second, PrevIndex: uint64(prevIndex), PrevValue: prevValue, NqRequest: nqrequest})
 	cancel()
 	if err != nil {
 		handleError(ExitServerError, err)

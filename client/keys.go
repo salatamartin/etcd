@@ -191,6 +191,10 @@ type SetOptions struct {
 
 	// Dir specifies whether or not this Node should be created as a directory.
 	Dir bool
+	
+	// NqRequest specifies, whether no-quorum set request should be issued
+	// only available for requests without Prev* attributes set 
+	NqRequest bool
 }
 
 type GetOptions struct {
@@ -335,6 +339,7 @@ func (k *httpKeysAPI) Set(ctx context.Context, key, val string, opts *SetOptions
 		act.TTL = opts.TTL
 		act.Refresh = opts.Refresh
 		act.Dir = opts.Dir
+		act.NqRequest = opts.NqRequest
 	}
 
 	resp, body, err := k.client.Do(ctx, act)
@@ -527,6 +532,7 @@ type setAction struct {
 	TTL       time.Duration
 	Refresh   bool
 	Dir       bool
+	NqRequest bool
 }
 
 func (a *setAction) HTTPRequest(ep url.URL) *http.Request {
@@ -559,6 +565,9 @@ func (a *setAction) HTTPRequest(ep url.URL) *http.Request {
 
 	if a.Refresh {
 		form.Add("refresh", "true")
+	}
+	if a.NqRequest {
+		form.Add("nqrequest", "true")
 	}
 
 	u.RawQuery = params.Encode()
