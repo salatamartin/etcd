@@ -795,7 +795,7 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 
 		proposePending.Inc()
 		defer proposePending.Dec()
-		s.r.Raft().EmptyNoLongerLeader()
+		//s.r.Raft().EmptyNoLongerLeader()
 		select {
 		case x := <-ch:
 			proposeDurations.Observe(float64(time.Since(start)) / float64(time.Second))
@@ -805,10 +805,10 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 			proposeFailed.Inc()
 			s.w.Trigger(r.ID, nil) // GC wait
 			return Response{}, s.parseProposeCtxErr(ctx.Err(), start)
-		case <-s.r.Raft().NoLongerLeader:
+		/*case <-s.r.Raft().NoLongerLeader:
 			proposeFailed.Inc()
 			s.w.Trigger(r.ID, nil) // GC wait
-			return Response{}, errors.New("Leader changed state and is no longer able to commit requests")
+			return Response{}, errors.New("Leader changed state and is no longer able to commit requests")*/
 		case <-s.done:
 			return Response{}, ErrStopped
 		}
@@ -1465,8 +1465,7 @@ func (s *EtcdServer) monitorLocalStore() {
 					},
 				}
 
-				s.r.Raft().AddMsgToSend(response)
-
+				s.send([]raftpb.Message{response})
 			}
 			cancel()
 		}
@@ -1515,7 +1514,7 @@ func (s *EtcdServer) monitorLocalWaitingList() {
 						},
 					},
 				}
-				s.r.Raft().AddMsgToSend(response)
+				s.send([]raftpb.Message{response})
 				//plog.Infof("Successfully sent ACK to follower: %s", toAck.Print())
 			}
 

@@ -57,14 +57,14 @@ func (rn *RawNode) commitReady(rd Ready) {
 		// incorporated into the snapshot, even if rd.CommittedEntries is
 		// empty). Therefore we mark all committed entries as applied
 		// whether they were included in rd.HardState or not.
-		rn.raft.RaftLog.appliedTo(rn.prevHardSt.Commit)
+		rn.raft.raftLog.appliedTo(rn.prevHardSt.Commit)
 	}
 	if len(rd.Entries) > 0 {
 		e := rd.Entries[len(rd.Entries)-1]
-		rn.raft.RaftLog.stableTo(e.Index, e.Term)
+		rn.raft.raftLog.stableTo(e.Index, e.Term)
 	}
 	if !pb.IsEmptySnap(rd.Snapshot) {
-		rn.raft.RaftLog.stableSnapTo(rd.Snapshot.Metadata.Index)
+		rn.raft.raftLog.stableSnapTo(rd.Snapshot.Metadata.Index)
 	}
 }
 
@@ -97,8 +97,8 @@ func NewRawNode(config *Config, peers []Peer) (*RawNode, error) {
 
 			ents[i] = pb.Entry{Type: pb.EntryConfChange, Term: 1, Index: uint64(i + 1), Data: data}
 		}
-		r.RaftLog.append(ents...)
-		r.RaftLog.committed = uint64(len(ents))
+		r.raftLog.append(ents...)
+		r.raftLog.committed = uint64(len(ents))
 		for _, peer := range peers {
 			r.addNode(peer.ID)
 		}
@@ -194,10 +194,10 @@ func (rn *RawNode) HasReady() bool {
 	if hardSt := r.hardState(); !pb.IsEmptyHardState(hardSt) && !pb.IsHardStateEqual(hardSt, rn.prevHardSt) {
 		return true
 	}
-	if r.RaftLog.unstable.snapshot != nil && !pb.IsEmptySnap(*r.RaftLog.unstable.snapshot) {
+	if r.raftLog.unstable.snapshot != nil && !pb.IsEmptySnap(*r.raftLog.unstable.snapshot) {
 		return true
 	}
-	if len(r.msgs) > 0 || len(r.RaftLog.unstableEntries()) > 0 || r.RaftLog.hasNextEnts() {
+	if len(r.msgs) > 0 || len(r.raftLog.unstableEntries()) > 0 || r.raftLog.hasNextEnts() {
 		return true
 	}
 	return false

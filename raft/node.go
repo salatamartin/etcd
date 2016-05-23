@@ -160,8 +160,6 @@ type Node interface {
 	ReportSnapshot(id uint64, status SnapshotStatus)
 	// Stop performs any necessary termination of the Node.
 	Stop()
-	//returns current instance of raft corresponding to Node
-	Raft() *raft
 }
 
 type Peer struct {
@@ -182,13 +180,13 @@ func StartNode(c *Config, peers []Peer) Node {
 		if err != nil {
 			panic("unexpected marshal error")
 		}
-		e := pb.Entry{Type: pb.EntryConfChange, Term: 1, Index: r.RaftLog.lastIndex() + 1, Data: d}
-		r.RaftLog.append(e)
+		e := pb.Entry{Type: pb.EntryConfChange, Term: 1, Index: r.raftLog.lastIndex() + 1, Data: d}
+		r.raftLog.append(e)
 	}
 	// Mark these initial entries as committed.
 	// TODO(bdarnell): These entries are still unstable; do we need to preserve
 	// the invariant that committed < unstable?
-	r.RaftLog.committed = r.RaftLog.lastIndex()
+	r.raftLog.committed = r.raftLog.lastIndex()
 	// Now apply them, mainly so that the application can call Campaign
 	// immediately after StartNode in tests. Note that these nodes will
 	// be added to raft twice: here and when the application's Ready
@@ -364,13 +362,13 @@ func (n *node) run(r *raft) {
 			advancec = n.advancec
 		case <-advancec:
 			if prevHardSt.Commit != 0 {
-				r.RaftLog.appliedTo(prevHardSt.Commit)
+				r.raftLog.appliedTo(prevHardSt.Commit)
 			}
 			if havePrevLastUnstablei {
-				r.RaftLog.stableTo(prevLastUnstablei, prevLastUnstablet)
+				r.raftLog.stableTo(prevLastUnstablei, prevLastUnstablet)
 				havePrevLastUnstablei = false
 			}
-			r.RaftLog.stableSnapTo(prevSnapi)
+			r.raftLog.stableSnapTo(prevSnapi)
 			advancec = nil
 		case c := <-n.status:
 			c <- getStatus(r)
@@ -477,8 +475,8 @@ func (n *node) ReportSnapshot(id uint64, status SnapshotStatus) {
 
 func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
 	rd := Ready{
-		Entries:          r.RaftLog.unstableEntries(),
-		CommittedEntries: r.RaftLog.nextEnts(),
+		Entries:          r.raftLog.unstableEntries(),
+		CommittedEntries: r.raftLog.nextEnts(),
 		Messages:         r.msgs,
 	}
 	if softSt := r.softState(); !softSt.equal(prevSoftSt) {
@@ -487,10 +485,9 @@ func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
 	if hardSt := r.hardState(); !pb.IsHardStateEqual(hardSt, prevHardSt) {
 		rd.HardState = hardSt
 	}
-	if r.RaftLog.unstable.snapshot != nil {
-		rd.Snapshot = *r.RaftLog.unstable.snapshot
+	if r.raftLog.unstable.snapshot != nil {
+		rd.Snapshot = *r.raftLog.unstable.snapshot
 	}
 	return rd
 }
 
-func (n *node) Raft() *raft { return n.raft }
