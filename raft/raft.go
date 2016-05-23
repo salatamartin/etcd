@@ -21,7 +21,6 @@ import (
 	"math/rand"
 	"sort"
 	"strings"
-	"sync"
 
 	"path"
 	"regexp"
@@ -30,8 +29,8 @@ import (
 
 	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
-	pb "github.com/coreos/etcd/raft/raftpb"
 	ls "github.com/coreos/etcd/localstore"
+	pb "github.com/coreos/etcd/raft/raftpb"
 )
 
 // None is a placeholder node ID used when there is no leader.
@@ -209,7 +208,7 @@ type raft struct {
 	tick             func()
 	step             stepFunc
 
-	logger Logger
+	logger     Logger
 	localStore *ls.LocalStore
 }
 
@@ -243,7 +242,7 @@ func newRaft(c *Config) *raft {
 		heartbeatTimeout: c.HeartbeatTick,
 		logger:           c.Logger,
 		checkQuorum:      c.CheckQuorum,
-		localStore:		   c.LocalStore,
+		localStore:       c.LocalStore,
 	}
 	r.rand = rand.New(rand.NewSource(int64(c.ID)))
 	for _, p := range peers {
@@ -329,7 +328,7 @@ func (r *raft) sendAppend(to uint64) {
 			}
 			panic(err) // TODO(bdarnell)
 		}
-		if IsEmptySnap(snapshot) {
+		if pb.IsEmptySnap(snapshot) {
 			panic("need non-empty snapshot")
 		}
 		m.Snapshot = snapshot
@@ -1056,6 +1055,7 @@ func (r *raft) AddMsgToSend(m pb.Message) {
 	r.send(m)
 }
 
+/*
 func (r *raft) RefillNoLongerLeader() {
 	r.noLongerLeaderMux.Lock()
 	defer r.noLongerLeaderMux.Unlock()
@@ -1080,3 +1080,4 @@ func (r *raft) EmptyNoLongerLeader() {
 		}
 	}
 }
+*/

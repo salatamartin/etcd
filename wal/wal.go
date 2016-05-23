@@ -560,3 +560,7 @@ func mustSync(st, prevst raftpb.HardState, entsnum int) bool {
 	}
 	return false
 }
+
+func (w *WAL) GetDir() string {
+	return w.dir
+}

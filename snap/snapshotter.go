@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/pkg/pbutil"
-	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/snap/snappb"
 
