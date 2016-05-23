@@ -82,7 +82,7 @@ func DescribeMessage(m pb.Message, f EntryFormatter) string {
 		}
 		fmt.Fprintf(&buf, "]")
 	}
-	if !pb.IsEmptySnap(m.Snapshot) {
+	if !IsEmptySnap(m.Snapshot) {
 		fmt.Fprintf(&buf, " Snapshot:%v", m.Snapshot)
 	}
 	return buf.String()

@@ -79,7 +79,6 @@ type Ready struct {
 	Messages []pb.Message
 }
 
-/*
 func isHardStateEqual(a, b pb.HardState) bool {
 	return a.Term == b.Term && a.Vote == b.Vote && a.Commit == b.Commit
 }
@@ -93,10 +92,10 @@ func IsEmptyHardState(st pb.HardState) bool {
 func IsEmptySnap(sp pb.Snapshot) bool {
 	return sp.Metadata.Index == 0
 }
-*/
+
 func (rd Ready) containsUpdates() bool {
-	return rd.SoftState != nil || !pb.IsEmptyHardState(rd.HardState) ||
-		!pb.IsEmptySnap(rd.Snapshot) || len(rd.Entries) > 0 ||
+	return rd.SoftState != nil || !IsEmptyHardState(rd.HardState) ||
+		!IsEmptySnap(rd.Snapshot) || len(rd.Entries) > 0 ||
 		len(rd.CommittedEntries) > 0 || len(rd.Messages) > 0
 }
 
@@ -201,7 +200,6 @@ func StartNode(c *Config, peers []Peer) Node {
 	}
 
 	n := newNode()
-	n.raft = r
 	go n.run(r)
 	return &n
 }
@@ -214,7 +212,6 @@ func RestartNode(c *Config) Node {
 	r := newRaft(c)
 
 	n := newNode()
-	n.raft = r
 	go n.run(r)
 	return &n
 }
@@ -231,7 +228,6 @@ type node struct {
 	done       chan struct{}
 	stop       chan struct{}
 	status     chan chan Status
-	raft       *raft
 }
 
 func newNode() node {
@@ -352,10 +348,10 @@ func (n *node) run(r *raft) {
 				prevLastUnstablet = rd.Entries[len(rd.Entries)-1].Term
 				havePrevLastUnstablei = true
 			}
-			if !pb.IsEmptyHardState(rd.HardState) {
+			if !IsEmptyHardState(rd.HardState) {
 				prevHardSt = rd.HardState
 			}
-			if !pb.IsEmptySnap(rd.Snapshot) {
+			if !IsEmptySnap(rd.Snapshot) {
 				prevSnapi = rd.Snapshot.Metadata.Index
 			}
 			r.msgs = nil
@@ -482,7 +478,7 @@ func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
 	if softSt := r.softState(); !softSt.equal(prevSoftSt) {
 		rd.SoftState = softSt
 	}
-	if hardSt := r.hardState(); !pb.IsHardStateEqual(hardSt, prevHardSt) {
+	if hardSt := r.hardState(); !isHardStateEqual(hardSt, prevHardSt) {
 		rd.HardState = hardSt
 	}
 	if r.raftLog.unstable.snapshot != nil {
@@ -490,4 +486,3 @@ func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
 	}
 	return rd
 }
-

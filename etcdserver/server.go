@@ -211,10 +211,13 @@ type EtcdServer struct {
 	// count the number of inflight snapshots.
 	// MUST use atomic operation to access this field.
 	inflightSnapshots int64
-	
+
 	// localstore handles non-quorum PUT requests persistently
 	localStore *ls.LocalStore
 
+	// wg is used to wait for the go routines that depends on the server state
+	// to exit when stopping the server.
+	wg sync.WaitGroup
 }
 
 // NewServer creates a new EtcdServer from the supplied configuration. The
@@ -277,7 +280,7 @@ func NewServer(cfg *ServerConfig) (*EtcdServer, error) {
 
 
 	cfg.LocalStore = lStore
-	
+
 	var remotes []*Member
 	switch {
 	case !haveWAL && !cfg.NewCluster:
@@ -383,8 +386,6 @@ func NewServer(cfg *ServerConfig) (*EtcdServer, error) {
 	}
 	sstats.Initialize()
 	lstats := stats.NewLeaderStats(id.String())
-	
-
 
 	srv := &EtcdServer{
 		cfg:       cfg,
@@ -558,8 +559,14 @@ func (s *EtcdServer) run() {
 	}
 
 	defer func() {
-		s.r.stop()
 		sched.Stop()
+
+		// wait for snapshots before closing raft so wal stays open
+		s.wg.Wait()
+
+		// must stop raft after scheduler-- etcdserver can leak rafthttp pipelines
+		// by adding a peer after raft stops the transport
+		s.r.stop()
 
 		// kv, lessor and backend can be nil if running without v3 enabled
 		// or running unit tests.
@@ -622,7 +629,7 @@ func (s *EtcdServer) applyAll(ep *etcdProgress, apply *apply) {
 }
 
 func (s *EtcdServer) applySnapshot(ep *etcdProgress, apply *apply) {
-	if raftpb.IsEmptySnap(apply.snapshot) {
+	if raft.IsEmptySnap(apply.snapshot) {
 		return
 	}
 
@@ -795,7 +802,7 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 
 		proposePending.Inc()
 		defer proposePending.Dec()
-		//s.r.Raft().EmptyNoLongerLeader()
+
 		select {
 		case x := <-ch:
 			proposeDurations.Observe(float64(time.Since(start)) / float64(time.Second))
@@ -805,10 +812,6 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 			proposeFailed.Inc()
 			s.w.Trigger(r.ID, nil) // GC wait
 			return Response{}, s.parseProposeCtxErr(ctx.Err(), start)
-		/*case <-s.r.Raft().NoLongerLeader:
-			proposeFailed.Inc()
-			s.w.Trigger(r.ID, nil) // GC wait
-			return Response{}, errors.New("Leader changed state and is no longer able to commit requests")*/
 		case <-s.done:
 			return Response{}, ErrStopped
 		}
@@ -1234,7 +1237,10 @@ func (s *EtcdServer) applyConfChange(cc raftpb.ConfChange, confState *raftpb.Con
 func (s *EtcdServer) snapshot(snapi uint64, confState raftpb.ConfState) {
 	clone := s.store.Clone()
 
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
+
 		d, err := clone.SaveNoCopy()
 		// TODO: current store will never fail to do a snapshot
 		// what should we do if the store might fail?

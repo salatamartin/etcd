@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/pkg/pbutil"
+	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/snap/snappb"
 
@@ -57,7 +58,7 @@ func New(dir string) *Snapshotter {
 }
 
 func (s *Snapshotter) SaveSnap(snapshot raftpb.Snapshot) error {
-	if raftpb.IsEmptySnap(snapshot) {
+	if raft.IsEmptySnap(snapshot) {
 		return nil
 	}
 	return s.save(&snapshot)

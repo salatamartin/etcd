@@ -208,7 +208,7 @@ func (r *raftNode) start(s *EtcdServer) {
 					r.s.send(rd.Messages)
 				}
 
-				if !raftpb.IsEmptySnap(rd.Snapshot) {
+				if !raft.IsEmptySnap(rd.Snapshot) {
 					if err := r.storage.SaveSnap(rd.Snapshot); err != nil {
 						plog.Fatalf("raft save snapshot error: %v", err)
 					}

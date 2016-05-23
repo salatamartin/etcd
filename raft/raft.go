@@ -167,29 +167,29 @@ func (c *Config) validate() error {
 }
 
 type raft struct {
-	id              uint64
+	id uint64
 
-	Term            uint64
-	Vote            uint64
+	Term uint64
+	Vote uint64
 
 	// the log
-	raftLog         *raftLog
+	raftLog *raftLog
 
-	maxInflight     int
-	maxMsgSize      uint64
-	prs             map[uint64]*Progress
+	maxInflight int
+	maxMsgSize  uint64
+	prs         map[uint64]*Progress
 
-	state           StateType
+	state StateType
 
-	votes           map[uint64]bool
+	votes map[uint64]bool
 
-	msgs            []pb.Message
+	msgs []pb.Message
 
 	// the leader id
-	lead            uint64
+	lead uint64
 
 	// New configuration is ignored if there exists unapplied configuration.
-	pendingConf     bool
+	pendingConf bool
 
 	// number of ticks since it reached last electionTimeout when it is leader
 	// or candidate.
@@ -210,12 +210,6 @@ type raft struct {
 	step             stepFunc
 
 	logger Logger
-
-	// filled in change-state function(becomeCandidate, becomeFollower)
-	// used to unblock Do method without deadline(candidate can no longer commit requests)
-	NoLongerLeader chan struct{}
-	// locks access to NoLongerLeader during refill operation
-	noLongerLeaderMux sync.Mutex
 	localStore *ls.LocalStore
 }
 
@@ -224,7 +218,6 @@ func newRaft(c *Config) *raft {
 		panic(err.Error())
 	}
 	raftlog := newLog(c.Storage, c.Logger)
-
 	hs, cs, err := c.Storage.InitialState()
 	if err != nil {
 		panic(err) // TODO(bdarnell)
@@ -240,25 +233,23 @@ func newRaft(c *Config) *raft {
 		peers = cs.Nodes
 	}
 	r := &raft{
-		id:                c.ID,
-		lead:              None,
-		raftLog:           raftlog,
-		maxMsgSize:        c.MaxSizePerMsg,
-		maxInflight:       c.MaxInflightMsgs,
-		prs:               make(map[uint64]*Progress),
-		electionTimeout:   c.ElectionTick,
-		heartbeatTimeout:  c.HeartbeatTick,
-		logger:            c.Logger,
-		checkQuorum:       c.CheckQuorum,
-		NoLongerLeader:    make(chan struct{}, 1),
-		noLongerLeaderMux: sync.Mutex{},
+		id:               c.ID,
+		lead:             None,
+		raftLog:          raftlog,
+		maxMsgSize:       c.MaxSizePerMsg,
+		maxInflight:      c.MaxInflightMsgs,
+		prs:              make(map[uint64]*Progress),
+		electionTimeout:  c.ElectionTick,
+		heartbeatTimeout: c.HeartbeatTick,
+		logger:           c.Logger,
+		checkQuorum:      c.CheckQuorum,
 		localStore:		   c.LocalStore,
 	}
 	r.rand = rand.New(rand.NewSource(int64(c.ID)))
 	for _, p := range peers {
 		r.prs[p] = &Progress{Next: 1, ins: newInflights(r.maxInflight)}
 	}
-	if !pb.IsHardStateEqual(hs, emptyState) {
+	if !isHardStateEqual(hs, emptyState) {
 		r.loadState(hs)
 	}
 	if c.Applied > 0 {
@@ -338,7 +329,7 @@ func (r *raft) sendAppend(to uint64) {
 			}
 			panic(err) // TODO(bdarnell)
 		}
-		if pb.IsEmptySnap(snapshot) {
+		if IsEmptySnap(snapshot) {
 			panic("need non-empty snapshot")
 		}
 		m.Snapshot = snapshot
@@ -420,19 +411,6 @@ func (r *raft) maybeCommit() bool {
 	}
 	sort.Sort(sort.Reverse(mis))
 	mci := mis[r.quorum()-1]
-	//plog.Infof("Matches of every peer is: %v, the used index is %d (%d)", mis, r.quorum()-1, mci)
-	return r.raftLog.maybeCommit(mci, r.Term)
-}
-
-func (r *raft) maybeCommitWithoutQuorum() bool {
-	// TODO(bmizerany): optimize.. Currently naive
-	mis := make(uint64Slice, 0, len(r.prs))
-	for id := range r.prs {
-		mis = append(mis, r.prs[id].Match)
-	}
-	sort.Sort(sort.Reverse(mis))
-	mci := mis[0]
-	//plog.Infof("Matches of every peer is: %v, the used index is %d (%d)", mis, r.quorum()-1, mci)
 	return r.raftLog.maybeCommit(mci, r.Term)
 }
 
@@ -506,7 +484,6 @@ func (r *raft) tickHeartbeat() {
 func (r *raft) becomeFollower(term uint64, lead uint64) {
 	if r.state == StateLeader {
 		go r.localStore.ClearExternEntries(r.id)
-		r.RefillNoLongerLeader()
 	}
 	r.step = stepFollower
 	r.reset(term)
@@ -525,7 +502,6 @@ func (r *raft) becomeFollower(term uint64, lead uint64) {
 func (r *raft) becomeCandidate() {
 	// TODO(xiangli) remove the panic when the raft implementation is stable
 	if r.state == StateLeader {
-		r.RefillNoLongerLeader()
 		panic("invalid transition [leader -> candidate]")
 	}
 	if r.state == StateLeader {
@@ -983,6 +959,12 @@ func (r *raft) addNode(id uint64) {
 func (r *raft) removeNode(id uint64) {
 	r.delProgress(id)
 	r.pendingConf = false
+
+	// do not try to commit or abort transferring if there is no nodes in the cluster.
+	if len(r.prs) == 0 {
+		return
+	}
+
 	// The quorum size is now smaller, so see if any pending entries can
 	// be committed.
 	if r.maybeCommit() {

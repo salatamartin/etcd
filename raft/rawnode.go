@@ -44,7 +44,7 @@ func (rn *RawNode) commitReady(rd Ready) {
 	if rd.SoftState != nil {
 		rn.prevSoftSt = rd.SoftState
 	}
-	if !pb.IsEmptyHardState(rd.HardState) {
+	if !IsEmptyHardState(rd.HardState) {
 		rn.prevHardSt = rd.HardState
 	}
 	if rn.prevHardSt.Commit != 0 {
@@ -63,7 +63,7 @@ func (rn *RawNode) commitReady(rd Ready) {
 		e := rd.Entries[len(rd.Entries)-1]
 		rn.raft.raftLog.stableTo(e.Index, e.Term)
 	}
-	if !pb.IsEmptySnap(rd.Snapshot) {
+	if !IsEmptySnap(rd.Snapshot) {
 		rn.raft.raftLog.stableSnapTo(rd.Snapshot.Metadata.Index)
 	}
 }
@@ -191,10 +191,10 @@ func (rn *RawNode) HasReady() bool {
 	if !r.softState().equal(rn.prevSoftSt) {
 		return true
 	}
-	if hardSt := r.hardState(); !pb.IsEmptyHardState(hardSt) && !pb.IsHardStateEqual(hardSt, rn.prevHardSt) {
+	if hardSt := r.hardState(); !IsEmptyHardState(hardSt) && !isHardStateEqual(hardSt, rn.prevHardSt) {
 		return true
 	}
-	if r.raftLog.unstable.snapshot != nil && !pb.IsEmptySnap(*r.raftLog.unstable.snapshot) {
+	if r.raftLog.unstable.snapshot != nil && !IsEmptySnap(*r.raftLog.unstable.snapshot) {
 		return true
 	}
 	if len(r.msgs) > 0 || len(r.raftLog.unstableEntries()) > 0 || r.raftLog.hasNextEnts() {
@@ -226,5 +226,3 @@ func (rn *RawNode) ReportSnapshot(id uint64, status SnapshotStatus) {
 
 	_ = rn.raft.Step(pb.Message{Type: pb.MsgSnapStatus, From: id, Reject: rej})
 }
-
-func (rn *RawNode) Raft() *raft { return rn.raft }
