@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/pkg/netutil"
+	ls "github.com/coreos/etcd/localstore"
 	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
 )
@@ -57,6 +58,7 @@ type ServerConfig struct {
 	StrictReconfigCheck bool
 
 	EnablePprof bool
+	LocalStore *ls.LocalStore
 }
 
 // VerifyBootstrap sanity-checks the initial config for bootstrap case

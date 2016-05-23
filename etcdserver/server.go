@@ -32,6 +32,7 @@ import (
 	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	"github.com/coreos/etcd/auth"
+	ls "github.com/coreos/etcd/localstore"
 	"github.com/coreos/etcd/compactor"
 	"github.com/coreos/etcd/discovery"
 	"github.com/coreos/etcd/etcdserver/etcdhttp/httptypes"
@@ -54,6 +55,7 @@ import (
 	"github.com/coreos/etcd/store"
 	"github.com/coreos/etcd/version"
 	"github.com/coreos/etcd/wal"
+	"github.com/coreos/etcd/wal/walpb"
 )
 
 const (
@@ -209,6 +211,10 @@ type EtcdServer struct {
 	// count the number of inflight snapshots.
 	// MUST use atomic operation to access this field.
 	inflightSnapshots int64
+	
+	// localstore handles non-quorum PUT requests persistently
+	localStore *ls.LocalStore
+
 }
 
 // NewServer creates a new EtcdServer from the supplied configuration. The
@@ -241,13 +247,37 @@ func NewServer(cfg *ServerConfig) (*EtcdServer, error) {
 	}
 
 	haveWAL := wal.Exist(cfg.WALDir())
-	haveLocalWAL := wal.Exist(cfg.LocalWALDir())
 	ss := snap.New(cfg.SnapDir())
 
 	prt, err := rafthttp.NewRoundTripper(cfg.PeerTLSInfo, cfg.peerDialTimeout())
 	if err != nil {
 		return nil, err
 	}
+
+	// localstore initialization
+	var lw *wal.WAL
+	var lents []raftpb.Entry
+	if wal.Exist(cfg.LocalWALDir()) {
+		if err = fileutil.IsDirWriteable(cfg.LocalWALDir()); err != nil {
+			return nil, fmt.Errorf("cannot write to LocalWAL directory: %v", err)
+		}
+		var localWalsnap walpb.Snapshot
+		lw, _, _, _, lents = readWAL(cfg.LocalWALDir(), localWalsnap)
+	} else {
+		var err error
+
+		if lw, err = wal.Create(cfg.LocalWALDir(), nil); err != nil {
+			return nil, fmt.Errorf("create local wal error: %v", err)
+		}
+	}
+	lStore := ls.NewLocalStore(lw)
+	if lents != nil && len(lents) > 0 {
+		lStore.Merge(lents)
+	}
+
+
+	cfg.LocalStore = lStore
+	
 	var remotes []*Member
 	switch {
 	case !haveWAL && !cfg.NewCluster:
@@ -316,10 +346,6 @@ func NewServer(cfg *ServerConfig) (*EtcdServer, error) {
 			return nil, fmt.Errorf("cannot write to WAL directory: %v", err)
 		}
 
-		if err := fileutil.IsDirWriteable(cfg.LocalWALDir()); err != nil && haveLocalWAL {
-			return nil, fmt.Errorf("cannot write to LocalWAL directory: %v", err)
-		}
-
 		if cfg.ShouldDiscover() {
 			plog.Warningf("discovery token ignored since a cluster has already been initialized. Valid log found at %q", cfg.WALDir())
 		}
@@ -357,6 +383,8 @@ func NewServer(cfg *ServerConfig) (*EtcdServer, error) {
 	}
 	sstats.Initialize()
 	lstats := stats.NewLeaderStats(id.String())
+	
+
 
 	srv := &EtcdServer{
 		cfg:       cfg,
@@ -369,16 +397,17 @@ func NewServer(cfg *ServerConfig) (*EtcdServer, error) {
 			raftStorage: s,
 			storage:     NewStorage(w, ss),
 		},
-		id:            id,
-		attributes:    Attributes{Name: cfg.Name, ClientURLs: cfg.ClientURLs.StringSlice()},
-		cluster:       cl,
-		stats:         sstats,
-		lstats:        lstats,
-		SyncTicker:    time.Tick(500 * time.Millisecond),
-		peerRt:        prt,
-		reqIDGen:      idutil.NewGenerator(uint16(id), time.Now()),
-		forceVersionC: make(chan struct{}),
-		msgSnapC:      make(chan raftpb.Message, maxInFlightMsgSnap),
+		id:                id,
+		attributes:        Attributes{Name: cfg.Name, ClientURLs: cfg.ClientURLs.StringSlice()},
+		cluster:           cl,
+		stats:             sstats,
+		lstats:            lstats,
+		SyncTicker:        time.Tick(500 * time.Millisecond),
+		peerRt:            prt,
+		reqIDGen:          idutil.NewGenerator(uint16(id), time.Now()),
+		forceVersionC:     make(chan struct{}),
+		msgSnapC:          make(chan raftpb.Message, maxInFlightMsgSnap),
+		localStore:		   lStore,
 	}
 
 	if cfg.V3demo {
@@ -743,13 +772,13 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 		if r.Method == "PUT" && r.NoQuorumRequest {
 			entry := raftpb.Entry{
 				Term:      s.Term(),
-				Index:     s.r.Raft().RaftLog.LocalStore.GetNextIndex(),
+				Index:     s.localStore.GetNextIndex(),
 				Timestamp: raftpb.NewTimestamp(),
 				Receiver:  uint64(s.ID()),
 				Data:      data,
 			}
 			//plog.Infof("NQPUT request received: %v", r)
-			event, err := s.r.Raft().RaftLog.LocalStore.MaybeAdd(entry)
+			event, err := s.localStore.MaybeAdd(entry)
 			if err != nil {
 				plog.Infof("Error during MaybeAdd, error: %s", err.Error())
 				return Response{}, err
@@ -766,7 +795,7 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 
 		proposePending.Inc()
 		defer proposePending.Dec()
-
+		s.r.Raft().EmptyNoLongerLeader()
 		select {
 		case x := <-ch:
 			proposeDurations.Observe(float64(time.Since(start)) / float64(time.Second))
@@ -776,6 +805,10 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 			proposeFailed.Inc()
 			s.w.Trigger(r.ID, nil) // GC wait
 			return Response{}, s.parseProposeCtxErr(ctx.Err(), start)
+		case <-s.r.Raft().NoLongerLeader:
+			proposeFailed.Inc()
+			s.w.Trigger(r.ID, nil) // GC wait
+			return Response{}, errors.New("Leader changed state and is no longer able to commit requests")
 		case <-s.done:
 			return Response{}, ErrStopped
 		}
@@ -789,7 +822,7 @@ func (s *EtcdServer) Do(ctx context.Context, r pb.Request) (Response, error) {
 			return Response{Watcher: wc}, nil
 		default:
 			//check local store for entry first, lEventErr holds info if "keynotfound"
-			lEvent, lEventErr := s.r.Raft().RaftLog.LocalStore.KVStore().Get(r.Path, r.Recursive, r.Sorted)
+			lEvent, lEventErr := s.localStore.KVStore().Get(r.Path, r.Recursive, r.Sorted)
 			if lEventErr != nil {
 				ev, err := s.store.Get(r.Path, r.Recursive, r.Sorted)
 				if err != nil {
@@ -1378,16 +1411,16 @@ func (s *EtcdServer) monitorLocalStore() {
 		select {
 		case <-s.done:
 			return
-		case <-s.r.Raft().RaftLog.LocalStore.EntriesFilled():
+		case <-s.localStore.EntriesFilled():
 
 			// if we are not leader, refill channel and wait to repeat
 			if s.r.lead != uint64(s.id) {
 				<-time.After(monitorLocalStoreInterval)
-				go raft.AddToChan(s.r.Raft().RaftLog.LocalStore.EntriesFilled())
+				go ls.AddToChan(s.localStore.EntriesFilled())
 				continue
 			}
 
-			lStore := &s.r.Raft().RaftLog.LocalStore
+			lStore := &s.localStore
 
 			//wait until localstore is initialised
 			if lStore == nil {
@@ -1449,14 +1482,14 @@ func (s *EtcdServer) monitorLocalWaitingList() {
 		select {
 		case <-s.done:
 			return
-		case <-s.r.Raft().RaftLog.LocalStore.WaitingForCommitFilled():
+		case <-s.localStore.WaitingForCommitFilled():
 			// if we are not leader, refill channel and wait to repeat
 			if s.r.lead != uint64(s.id) {
 				<-time.After(monitorLocalStoreInterval)
-				go raft.AddToChan(s.r.Raft().RaftLog.LocalStore.WaitingForCommitFilled())
+				go ls.AddToChan(s.localStore.WaitingForCommitFilled())
 				continue
 			}
-			lStore := &s.r.Raft().RaftLog.LocalStore
+			lStore := s.localStore
 
 			if len((*lStore).Entries()) == 0 && len((*lStore).WaitingForCommitEntries()) == 0 {
 				continue
@@ -1488,7 +1521,7 @@ func (s *EtcdServer) monitorLocalWaitingList() {
 
 			(*lStore).TruncateEmptyWaiting()
 			if len((*lStore).WaitingForCommitEntries()) != 0 {
-				go raft.AddToChan(s.r.Raft().RaftLog.LocalStore.WaitingForCommitFilled())
+				go ls.AddToChan(s.localStore.WaitingForCommitFilled())
 			}
 			<-time.After(localStoreWaitingListReCommitInterval)
 
@@ -1506,14 +1539,14 @@ func (s *EtcdServer) logLocalStoreState() {
 			return
 		}
 
-		lStore := &s.r.Raft().RaftLog.LocalStore
+		lStore := &s.localStore
 
 		//wait until localstore is initialised
 		if lStore == nil {
 			continue
 		}
 
-		plog.Infof("State of localStore.Entries: %s", raft.FormatEnts(s.r.Raft().RaftLog.LocalStore.Entries()))
-		plog.Infof("State of localStore.WaitingForCommit: %s", raft.FormatEnts(s.r.Raft().RaftLog.LocalStore.WaitingForCommitEntries()))
+		plog.Infof("State of localStore.Entries: %s", ls.FormatEnts(s.localStore.Entries()))
+		plog.Infof("State of localStore.WaitingForCommit: %s", ls.FormatEnts(s.localStore.WaitingForCommitEntries()))
 	}
 }

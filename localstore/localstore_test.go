@@ -1,4 +1,4 @@
-package raft
+package localstore
 
 import (
 	"github.com/coreos/etcd/raft/raftpb"

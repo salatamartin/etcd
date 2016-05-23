@@ -1,4 +1,4 @@
-package raft
+package localstore
 
 import (
 	"bytes"
@@ -7,12 +7,11 @@ import (
 	"sync"
 	"time"
 
-	//serverpb "github.com/coreos/etcd/etcdserver/etcdserverpb"
+
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
+	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
 	pb "github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/wal"
-	//"github.com/coreos/etcd/wal/walpb"
-	//"github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"errors"
 	"fmt"
 	"github.com/coreos/etcd/store"
@@ -20,11 +19,16 @@ import (
 )
 
 const (
-	pushLocalStoreDeadline = 10 * time.Second
+	PushLocalStoreDeadline = 10 * time.Second
 	ClusterPrefix          = "/0"
 	KeysPrefix             = "/1"
 )
+var(
+	plog = capnslog.NewPackageLogger("github.com/coreos/etcd", "etcdserver")
+)
 
+
+/*
 type LocalStore interface {
 	MaybeAdd(ent pb.Entry) (*store.Event, error)
 
@@ -77,8 +81,8 @@ type LocalStore interface {
 
 	WaitingForCommitFilled() chan struct{}
 }
-
-type localStore struct {
+*/
+type LocalStore struct {
 	entsMutex         sync.Mutex
 	indexMutex        sync.Mutex
 	waitingMutex      sync.Mutex
@@ -86,7 +90,6 @@ type localStore struct {
 	ents              []pb.Entry
 	waitingForCommit  []pb.Entry
 	wal               *wal.WAL
-	logger            Logger
 	nextIndex		  uint64
 	lastIndexSent     uint64
 	lastTimestampSent int64
@@ -98,17 +101,19 @@ type localStore struct {
 	waitingFilled     chan struct{}
 }
 
-func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) localStore {
-	return localStore{
+func NewLocalStore(lw *wal.WAL) *LocalStore {
+	//TODO(martin) : create logger
+
+	
+	return &LocalStore{
 		ents:             []pb.Entry{},
 		waitingForCommit: []pb.Entry{},
-		wal:              w,
-		logger:           log,
+		wal:              lw,
 		entsMutex:        sync.Mutex{},
-		indexMutex:        sync.Mutex{},
+		indexMutex:       sync.Mutex{},
 		waitingMutex:     sync.Mutex{},
 		walMutex:         sync.Mutex{},
-		lastInWal:        wSize,
+		lastInWal:        0,
 		kvStore:          store.New(ClusterPrefix, KeysPrefix),
 		entriesFilled:    make(chan struct{}),
 		waitingFilled:    make(chan struct{}),
@@ -117,7 +122,7 @@ func NewLocalStore(log Logger, w *wal.WAL, wSize uint64) localStore {
 
 // returns next unique index for local entries and increases value atomically for future calls
 // can overflow
-func (ls *localStore) GetNextIndex() uint64{
+func (ls *LocalStore) GetNextIndex() uint64{
 	ls.indexMutex.Lock()
 	defer ls.indexMutex.Unlock()
 	ls.nextIndex++
@@ -127,18 +132,18 @@ func (ls *localStore) GetNextIndex() uint64{
 // tries to add entry to local log, persistent storage and reflect it to KV store
 // fails if entry with the same request header, term and timestamp already exists
 // if successful, returns event from KV store
-func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
+func (ls *LocalStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 	ls.entsMutex.Lock()
 	defer ls.entsMutex.Unlock()
 	for index, entry := range ls.ents {
 		if entry.CompareRequest(ent) {
 			if entry.Term > ent.Term {
-				errStr := fmt.Sprintf("Conflict found, localstore already has entry %s, but with higher term", ent.Print())
+				errStr := fmt.Sprintf("Conflict found, LocalStore already has entry %s, but with higher term", ent.Print())
 				plog.Infof(errStr)
 				return nil, errors.New(errStr)
 			} else if entry.Term == ent.Term {
 				if entry.Timestamp >= ent.Timestamp {
-					errStr := fmt.Sprintf("Conflict found, localstore already has entry %s, but with higher timestamp", ent.Print())
+					errStr := fmt.Sprintf("Conflict found, LocalStore already has entry %s, but with higher timestamp", ent.Print())
 					plog.Infof(errStr)
 					return nil, errors.New(errStr)
 				}
@@ -175,13 +180,13 @@ func (ls *localStore) MaybeAdd(ent pb.Entry) (*store.Event, error) {
 }
 
 //returns list of local entries
-func (ls *localStore) Entries() []pb.Entry { return ls.ents }
+func (ls *LocalStore) Entries() []pb.Entry { return ls.ents }
 
 //returns list of entries waiting to be committed before removing
-func (ls *localStore) WaitingForCommitEntries() []pb.Entry { return ls.waitingForCommit }
+func (ls *LocalStore) WaitingForCommitEntries() []pb.Entry { return ls.waitingForCommit }
 
 //merges two lists of local entries
-func (ls *localStore) Merge(ents []pb.Entry) {
+func (ls *LocalStore) Merge(ents []pb.Entry) {
 	if len(ls.ents) == 0 {
 		ls.entsMutex.Lock()
 		defer ls.entsMutex.Unlock()
@@ -200,29 +205,29 @@ func (ls *localStore) Merge(ents []pb.Entry) {
 }
 
 // returns the index(local index, not unique) of last value snt for commit
-func (ls *localStore) LastSent() uint64 { return ls.lastIndexSent }
+func (ls *LocalStore) LastSent() uint64 { return ls.lastIndexSent }
 
-func (ls *localStore) SetLastSent(index uint64) {
+func (ls *LocalStore) SetLastSent(index uint64) {
 	ls.lastIndexSent = index
 }
 
 // returns timestamp of last merge request sent
-func (ls *localStore) LastTimestampSent() int64 { return ls.lastTimestampSent }
+func (ls *LocalStore) LastTimestampSent() int64 { return ls.lastTimestampSent }
 
-func (ls *localStore) SetLastTimestampSent(ts int64) {
+func (ls *LocalStore) SetLastTimestampSent(ts int64) {
 	ls.lastTimestampSent = ts
 }
 
 // returns current context of local store used for sending merge requests
-func (ls *localStore) Context() (context.Context, context.CancelFunc) { return ls.context, ls.cancel }
+func (ls *LocalStore) Context() (context.Context, context.CancelFunc) { return ls.context, ls.cancel }
 
-func (ls *localStore) SetContext(ctx context.Context, cancel context.CancelFunc) {
+func (ls *LocalStore) SetContext(ctx context.Context, cancel context.CancelFunc) {
 	ls.context = ctx
 	ls.cancel = cancel
 }
 
 // moves all entries already pushed to leader to waiting list
-func (ls *localStore) TrimWithLastSent() {
+func (ls *LocalStore) TrimWithLastSent() {
 	if ls.LastSent() == 0 {
 		return
 	}
@@ -246,7 +251,7 @@ func (ls *localStore) TrimWithLastSent() {
 }
 
 //removes all entries with nil or empty data value
-func (ls *localStore) TruncateEmpty() int {
+func (ls *LocalStore) TruncateEmpty() int {
 	ls.entsMutex.Lock()
 	defer ls.entsMutex.Unlock()
 	var count int
@@ -268,7 +273,7 @@ func (ls *localStore) TruncateEmpty() int {
 }
 
 //removes all entries from waiting list with nil or empty data value
-func (ls *localStore) TruncateEmptyWaiting() int {
+func (ls *LocalStore) TruncateEmptyWaiting() int {
 	ls.waitingMutex.Lock()
 	defer ls.waitingMutex.Unlock()
 	var count int
@@ -290,7 +295,7 @@ func (ls *localStore) TruncateEmptyWaiting() int {
 }
 
 // removes first count values from local log
-func (ls *localStore) RemoveFirst(count uint64) {
+func (ls *LocalStore) RemoveFirst(count uint64) {
 	ls.entsMutex.Lock()
 	defer ls.entsMutex.Unlock()
 	if len(ls.ents) == 0 {
@@ -302,7 +307,7 @@ func (ls *localStore) RemoveFirst(count uint64) {
 	}
 }
 
-func (ls *localStore) RemoveFromEntries(receiver, index uint64) *pb.Entry {
+func (ls *LocalStore) RemoveFromEntries(receiver, index uint64) *pb.Entry {
 	ls.entsMutex.Lock()
 	defer ls.entsMutex.Unlock()
 
@@ -330,7 +335,7 @@ func (ls *localStore) RemoveFromEntries(receiver, index uint64) *pb.Entry {
 
 // removes entry from waiting list after successful commit
 // original receiver and local unique id uniquely identifies all local requests
-func (ls *localStore) RemoveFromWaiting(receiver, index uint64) *pb.Entry {
+func (ls *LocalStore) RemoveFromWaiting(receiver, index uint64) *pb.Entry {
 	ls.waitingMutex.Lock()
 	defer ls.waitingMutex.Unlock()
 
@@ -373,11 +378,11 @@ func FormatEnts(ents []pb.Entry) string {
 }
 
 //returns current key-value representation of local store
-func (ls *localStore) KVStore() store.Store { return ls.kvStore }
+func (ls *LocalStore) KVStore() store.Store { return ls.kvStore }
 
 // removes write-ahead log and creates a new one
 // should only be called, when all entries were successfully committed
-func (ls *localStore) resetLocalWal() {
+func (ls *LocalStore) resetLocalWal() {
 	ls.walMutex.Lock()
 	defer ls.walMutex.Unlock()
 	ls.wal.Close()
@@ -403,7 +408,7 @@ func (ls *localStore) resetLocalWal() {
 }
 
 // moves all entries from waiting list back to entries
-func (ls *localStore) ResetWaitingList() {
+func (ls *LocalStore) ResetWaitingList() {
 	ls.entsMutex.Lock()
 	defer ls.entsMutex.Unlock()
 	ls.waitingMutex.Lock()
@@ -412,23 +417,23 @@ func (ls *localStore) ResetWaitingList() {
 }
 
 // removes all entries from waiting list
-func (ls *localStore) ClearWaitingList() {
+func (ls *LocalStore) ClearWaitingList() {
 	ls.waitingMutex.Lock()
 	defer ls.waitingMutex.Unlock()
 	ls.waitingForCommit = []pb.Entry{}
 }
 
 // channel representing whether any entries are present
-func (ls *localStore) EntriesFilled() chan struct{} {
+func (ls *LocalStore) EntriesFilled() chan struct{} {
 	return ls.entriesFilled
 }
 
 // channel representing whether any entries are present in waiting list
-func (ls *localStore) WaitingForCommitFilled() chan struct{} {
+func (ls *LocalStore) WaitingForCommitFilled() chan struct{} {
 	return ls.waitingFilled
 }
 
-func (ls *localStore) ClearExternEntries(myID uint64) {
+func (ls *LocalStore) ClearExternEntries(myID uint64) {
 	ls.entsMutex.Lock()
 	defer ls.entsMutex.Unlock()
 	for _,entry := range ls.ents {

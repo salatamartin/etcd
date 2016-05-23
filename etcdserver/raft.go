@@ -294,10 +294,6 @@ func startNode(cfg *ServerConfig, cl *cluster, ids []types.ID) (id types.ID, n r
 	if w, err = wal.Create(cfg.WALDir(), metadata); err != nil {
 		plog.Fatalf("create wal error: %v", err)
 	}
-	var lw *wal.WAL
-	if lw, err = wal.Create(cfg.LocalWALDir(), nil); err != nil {
-		plog.Fatalf("create local wal error: %v", err)
-	}
 	peers := make([]raft.Peer, len(ids))
 	for i, id := range ids {
 		ctx, err := json.Marshal((*cl).Member(id))
@@ -314,9 +310,9 @@ func startNode(cfg *ServerConfig, cl *cluster, ids []types.ID) (id types.ID, n r
 		ElectionTick:    cfg.ElectionTicks,
 		HeartbeatTick:   1,
 		Storage:         s,
-		LocalWal:        lw,
 		MaxSizePerMsg:   maxSizePerMsg,
 		MaxInflightMsgs: maxInflightMsgs,
+		LocalStore:		 cfg.LocalStore,
 	}
 
 	if cfg.V3demo {
@@ -338,9 +334,6 @@ func restartNode(cfg *ServerConfig, snapshot *raftpb.Snapshot) (types.ID, *clust
 	}
 	w, id, cid, st, ents := readWAL(cfg.WALDir(), walsnap)
 
-	var localWalsnap walpb.Snapshot
-	lw, _, _, _, lents := readWAL(cfg.LocalWALDir(), localWalsnap)
-
 	plog.Infof("restarting member %s in cluster %s at commit index %d", id, cid, st.Commit)
 	cl := newCluster("")
 	cl.SetID(cid)
@@ -357,8 +350,7 @@ func restartNode(cfg *ServerConfig, snapshot *raftpb.Snapshot) (types.ID, *clust
 		Storage:         s,
 		MaxSizePerMsg:   maxSizePerMsg,
 		MaxInflightMsgs: maxInflightMsgs,
-		LocalWal:        lw,
-		MaybeEnts:       lents,
+		LocalStore:		 cfg.LocalStore,
 	}
 
 	if cfg.V3demo {
@@ -418,6 +410,7 @@ func restartAsStandaloneNode(cfg *ServerConfig, snapshot *raftpb.Snapshot) (type
 		Storage:         s,
 		MaxSizePerMsg:   maxSizePerMsg,
 		MaxInflightMsgs: maxInflightMsgs,
+		LocalStore:		 cfg.LocalStore,
 	}
 	n := raft.RestartNode(c)
 	raftStatus = n.Status

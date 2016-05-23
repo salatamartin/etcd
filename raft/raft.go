@@ -21,15 +21,17 @@ import (
 	"math/rand"
 	"sort"
 	"strings"
+	"sync"
 
 	"path"
 	"regexp"
 
+	"time"
+
 	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
 	"github.com/coreos/etcd/Godeps/_workspace/src/golang.org/x/net/context"
 	pb "github.com/coreos/etcd/raft/raftpb"
-	"github.com/coreos/etcd/wal"
-	"time"
+	ls "github.com/coreos/etcd/localstore"
 )
 
 // None is a placeholder node ID used when there is no leader.
@@ -132,10 +134,8 @@ type Config struct {
 	// multiple raft group, each raft group can have its own logger
 	Logger Logger
 
-	// used in raftLog.LocalStore as persistent storage
-	LocalWal *wal.WAL
-
-	MaybeEnts []pb.Entry
+	// localstore handles non-quorum PUT requests persistently
+	LocalStore *ls.LocalStore
 }
 
 func (c *Config) validate() error {
@@ -210,16 +210,20 @@ type raft struct {
 	step             stepFunc
 
 	logger Logger
+
+	// filled in change-state function(becomeCandidate, becomeFollower)
+	// used to unblock Do method without deadline(candidate can no longer commit requests)
+	NoLongerLeader chan struct{}
+	// locks access to NoLongerLeader during refill operation
+	noLongerLeaderMux sync.Mutex
+	localStore *ls.LocalStore
 }
 
 func newRaft(c *Config) *raft {
 	if err := c.validate(); err != nil {
 		panic(err.Error())
 	}
-	raftlog := newLog(c.Storage, c.Logger, c.LocalWal, uint64(len(c.MaybeEnts)))
-	if c.MaybeEnts != nil && len(c.MaybeEnts) > 0 {
-		raftlog.LocalStore.Merge(c.MaybeEnts)
-	}
+	raftlog := newLog(c.Storage, c.Logger)
 
 	hs, cs, err := c.Storage.InitialState()
 	if err != nil {
@@ -236,16 +240,19 @@ func newRaft(c *Config) *raft {
 		peers = cs.Nodes
 	}
 	r := &raft{
-		id:               c.ID,
-		lead:             None,
-		RaftLog:          raftlog,
-		maxMsgSize:       c.MaxSizePerMsg,
-		maxInflight:      c.MaxInflightMsgs,
-		prs:              make(map[uint64]*Progress),
-		electionTimeout:  c.ElectionTick,
-		heartbeatTimeout: c.HeartbeatTick,
-		logger:           c.Logger,
-		checkQuorum:      c.CheckQuorum,
+		id:                c.ID,
+		lead:              None,
+		RaftLog:           raftlog,
+		maxMsgSize:        c.MaxSizePerMsg,
+		maxInflight:       c.MaxInflightMsgs,
+		prs:               make(map[uint64]*Progress),
+		electionTimeout:   c.ElectionTick,
+		heartbeatTimeout:  c.HeartbeatTick,
+		logger:            c.Logger,
+		checkQuorum:       c.CheckQuorum,
+		NoLongerLeader:    make(chan struct{}, 1),
+		noLongerLeaderMux: sync.Mutex{},
+		localStore:		   c.LocalStore,
 	}
 	r.rand = rand.New(rand.NewSource(int64(c.ID)))
 	for _, p := range peers {
@@ -498,7 +505,8 @@ func (r *raft) tickHeartbeat() {
 
 func (r *raft) becomeFollower(term uint64, lead uint64) {
 	if r.state == StateLeader {
-		go r.RaftLog.LocalStore.ClearExternEntries(r.id)
+		go r.localStore.ClearExternEntries(r.id)
+		r.RefillNoLongerLeader()
 	}
 	r.step = stepFollower
 	r.reset(term)
@@ -507,20 +515,21 @@ func (r *raft) becomeFollower(term uint64, lead uint64) {
 	r.state = StateFollower
 	r.logger.Infof("%x became follower at term %d", r.id, r.Term)
 	go func() {
-		if len(r.RaftLog.LocalStore.WaitingForCommitEntries()) == 0 {
+		if len(r.localStore.WaitingForCommitEntries()) == 0 {
 			return
 		}
-		r.RaftLog.LocalStore.ClearWaitingList()
+		r.localStore.ClearWaitingList()
 	}()
 }
 
 func (r *raft) becomeCandidate() {
 	// TODO(xiangli) remove the panic when the raft implementation is stable
 	if r.state == StateLeader {
+		r.RefillNoLongerLeader()
 		panic("invalid transition [leader -> candidate]")
 	}
 	if r.state == StateLeader {
-		go r.RaftLog.LocalStore.ClearExternEntries(r.id)
+		go r.localStore.ClearExternEntries(r.id)
 	}
 	r.step = stepCandidate
 	r.reset(r.Term + 1)
@@ -555,10 +564,10 @@ func (r *raft) becomeLeader() {
 		r.pendingConf = true
 	}
 	go func() {
-		if len(r.RaftLog.LocalStore.WaitingForCommitEntries()) == 0 {
+		if len(r.localStore.WaitingForCommitEntries()) == 0 {
 			return
 		}
-		r.RaftLog.LocalStore.ResetWaitingList()
+		r.localStore.ResetWaitingList()
 	}()
 	r.appendEntry(pb.Entry{Data: nil})
 	r.logger.Infof("%x became leader at term %d", r.id, r.Term)
@@ -673,7 +682,7 @@ func stepLeader(r *raft, m pb.Message) {
 	case pb.MsgLocalStoreMerge:
 		//plog.Infof("Received local store from %x to merge: %s", m.From, FormatEnts(m.Entries))
 		go func(m pb.Message) {
-			r.RaftLog.LocalStore.Merge(m.Entries)
+			r.localStore.Merge(m.Entries)
 			response := pb.Message{
 				Type:      pb.MsgLocalStoreMergeResp,
 				To:        m.From,
@@ -681,7 +690,7 @@ func stepLeader(r *raft, m pb.Message) {
 				Timestamp: m.Timestamp,
 			}
 			r.send(response)
-			r.RaftLog.LocalStore.TruncateEmpty()
+			r.localStore.TruncateEmpty()
 		}(m)
 
 		//plog.Infof("Leader's localStore after merge: %v", m.Entries)
@@ -691,7 +700,7 @@ func stepLeader(r *raft, m pb.Message) {
 		handleMsgLocalStoreCommited(r, m)
 		return
 	case pb.MsgLocalStoreCommittedResp:
-		r.RaftLog.LocalStore.RemoveFromWaiting(m.Entries[0].Receiver, m.Entries[0].Index)
+		r.localStore.RemoveFromWaiting(m.Entries[0].Receiver, m.Entries[0].Index)
 	}
 
 	// All other message types require a progress for m.From (pr).
@@ -776,10 +785,10 @@ func handleMsgLocalStoreCommited(r *raft, m pb.Message) {
 	entry := m.Entries[0]
 	// try to remove item from waiting for commit list and report success to leader
 	// (report success even if item was not find -> it has already been removed before and this is just duplicate request)
-	e := r.RaftLog.LocalStore.RemoveFromWaiting(entry.Receiver,entry.Index)
+	e := r.localStore.RemoveFromWaiting(entry.Receiver, entry.Index)
 	plog.Infof("Received MsgLocalStoreCommited message, with timestamp of committed message %v", time.Unix(0, m.Timestamp))
 	if e != nil {
-		r.RaftLog.LocalStore.TruncateEmptyWaiting()
+		r.localStore.TruncateEmptyWaiting()
 		plog.Infof("Entry %s successfully commited with quorum, removed from peristent storage", e.Print())
 
 	} else {
@@ -843,22 +852,22 @@ func stepFollower(r *raft, m pb.Message) {
 		r.handleHeartbeat(m)
 
 		//check LocalStore and if it is not empty, push it to leader
-		if len(r.RaftLog.LocalStore.Entries()) == 0 {
+		if len(r.localStore.Entries()) == 0 {
 			break
 		}
-		ctx, cancel := r.RaftLog.LocalStore.Context()
+		ctx, cancel := r.localStore.Context()
 		//only push to leader if there is no timeout registered yet
 		if ctx == nil {
-			ctx, cancel = context.WithTimeout(context.Background(), pushLocalStoreDeadline)
-			r.RaftLog.LocalStore.SetContext(ctx, cancel)
+			ctx, cancel = context.WithTimeout(context.Background(), ls.PushLocalStoreDeadline)
+			r.localStore.SetContext(ctx, cancel)
 			r.pushLocalStore(m.From)
 		} else {
 			select {
 			case <-ctx.Done():
 				plog.Infof("Deadline for LocalStore response is finished")
 				cancel()
-				r.RaftLog.LocalStore.SetContext(nil, nil)
-				//r.RaftLog.Localstore.SetLastSent(0)
+				r.localStore.SetContext(nil, nil)
+				//r.localStore.SetLastSent(0)
 			default:
 			}
 		}
@@ -879,10 +888,10 @@ func stepFollower(r *raft, m pb.Message) {
 		}
 	case pb.MsgLocalStoreMergeResp:
 		// check if response can be paired to the last MsgLocalStoreMerge request
-		if m.Timestamp == r.RaftLog.LocalStore.LastTimestampSent() {
+		if m.Timestamp == r.localStore.LastTimestampSent() {
 			plog.Infof("Received MsfLocalStoreResp with valid lastTimestampSent (%v), moving log to waitingForCommit", time.Unix(0, m.Timestamp))
-			r.RaftLog.LocalStore.TrimWithLastSent()
-			r.RaftLog.LocalStore.SetContext(nil, nil)
+			r.localStore.TrimWithLastSent()
+			r.localStore.SetContext(nil, nil)
 		}
 	case pb.MsgLocalStoreCommitted:
 		handleMsgLocalStoreCommited(r, m)
@@ -1035,14 +1044,14 @@ func (r *raft) checkQuorumActive() bool {
 }
 
 func (r *raft) pushLocalStore(to uint64) {
-	ents := r.RaftLog.LocalStore.Entries()
+	ents := r.localStore.Entries()
 	ls := uint64(len(ents))
 	if ls > maxLocalStorePush {
 		ls = maxLocalStorePush
 	}
 	ts := time.Now().UnixNano()
-	r.RaftLog.LocalStore.SetLastSent(ls)
-	r.RaftLog.LocalStore.SetLastTimestampSent(ts)
+	r.localStore.SetLastSent(ls)
+	r.localStore.SetLastTimestampSent(ts)
 
 	//TODO: is term and index here necessary?
 	m := pb.Message{
@@ -1059,8 +1068,33 @@ func (r *raft) pushLocalStore(to uint64) {
 func (r *raft) AddMsgToSend(m pb.Message) {
 	//if own message, deal with it directly in raft
 	if m.To == r.id {
-		go r.step(r,m)
+		go r.step(r, m)
 		return
 	}
 	r.send(m)
+}
+
+func (r *raft) RefillNoLongerLeader() {
+	r.noLongerLeaderMux.Lock()
+	defer r.noLongerLeaderMux.Unlock()
+	for {
+		select {
+		case <-r.NoLongerLeader:
+		default:
+			r.NoLongerLeader <- struct{}{}
+			return
+		}
+	}
+}
+
+func (r *raft) EmptyNoLongerLeader() {
+	r.noLongerLeaderMux.Lock()
+	defer r.noLongerLeaderMux.Unlock()
+	for {
+		select {
+		case <-r.NoLongerLeader:
+		default:
+			return
+		}
+	}
 }
