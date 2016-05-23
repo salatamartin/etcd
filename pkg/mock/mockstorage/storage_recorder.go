@@ -41,7 +41,7 @@ func (p *storageRecorder) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 }
 
 func (p *storageRecorder) SaveSnap(st raftpb.Snapshot) error {
-	if !raft.IsEmptySnap(st) {
+	if !raftpb.IsEmptySnap(st) {
 		p.Record(testutil.Action{Name: "SaveSnap"})
 	}
 	return nil

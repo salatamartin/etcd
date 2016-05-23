@@ -67,7 +67,7 @@ func (n *node) start() {
 			case <-ticker:
 				n.Tick()
 			case rd := <-n.Ready():
-				if !raft.IsEmptyHardState(rd.HardState) {
+				if !raftpb.IsEmptyHardState(rd.HardState) {
 					n.state = rd.HardState
 					n.storage.SetHardState(n.state)
 				}

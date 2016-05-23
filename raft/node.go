@@ -82,7 +82,7 @@ type Ready struct {
 func isHardStateEqual(a, b pb.HardState) bool {
 	return a.Term == b.Term && a.Vote == b.Vote && a.Commit == b.Commit
 }
-
+/*
 // IsEmptyHardState returns true if the given HardState is empty.
 func IsEmptyHardState(st pb.HardState) bool {
 	return isHardStateEqual(st, emptyState)
@@ -92,10 +92,10 @@ func IsEmptyHardState(st pb.HardState) bool {
 func IsEmptySnap(sp pb.Snapshot) bool {
 	return sp.Metadata.Index == 0
 }
-
+*/
 func (rd Ready) containsUpdates() bool {
-	return rd.SoftState != nil || !IsEmptyHardState(rd.HardState) ||
-		!IsEmptySnap(rd.Snapshot) || len(rd.Entries) > 0 ||
+	return rd.SoftState != nil || !pb.IsEmptyHardState(rd.HardState) ||
+		!pb.IsEmptySnap(rd.Snapshot) || len(rd.Entries) > 0 ||
 		len(rd.CommittedEntries) > 0 || len(rd.Messages) > 0
 }
 
@@ -348,10 +348,10 @@ func (n *node) run(r *raft) {
 				prevLastUnstablet = rd.Entries[len(rd.Entries)-1].Term
 				havePrevLastUnstablei = true
 			}
-			if !IsEmptyHardState(rd.HardState) {
+			if !pb.IsEmptyHardState(rd.HardState) {
 				prevHardSt = rd.HardState
 			}
-			if !IsEmptySnap(rd.Snapshot) {
+			if !pb.IsEmptySnap(rd.Snapshot) {
 				prevSnapi = rd.Snapshot.Metadata.Index
 			}
 			r.msgs = nil

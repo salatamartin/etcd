@@ -484,7 +484,7 @@ func (w *WAL) saveEntry(e *raftpb.Entry) error {
 }
 
 func (w *WAL) saveState(s *raftpb.HardState) error {
-	if raft.IsEmptyHardState(*s) {
+	if raftpb.IsEmptyHardState(*s) {
 		return nil
 	}
 	w.state = *s
@@ -498,7 +498,7 @@ func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 	defer w.mu.Unlock()
 
 	// short cut, do not call sync
-	if raft.IsEmptyHardState(st) && len(ents) == 0 {
+	if raftpb.IsEmptyHardState(st) && len(ents) == 0 {
 		return nil
 	}
 

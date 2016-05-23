@@ -629,7 +629,7 @@ func (s *EtcdServer) applyAll(ep *etcdProgress, apply *apply) {
 }
 
 func (s *EtcdServer) applySnapshot(ep *etcdProgress, apply *apply) {
-	if raft.IsEmptySnap(apply.snapshot) {
+	if raftpb.IsEmptySnap(apply.snapshot) {
 		return
 	}
 
